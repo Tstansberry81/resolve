@@ -53,6 +53,8 @@ export function Constellation() {
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
+      // ignore sub-pixel echoes so buffer writes can't feed a layout loop
+      if (Math.abs(rect.width - w) < 1 && Math.abs(rect.height - h) < 1) return;
       w = rect.width;
       h = rect.height;
       canvas.width = w * dpr;
