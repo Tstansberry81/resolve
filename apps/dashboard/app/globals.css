@@ -1,0 +1,203 @@
+/* ── RESOLVE design tokens ─────────────────────────────────────────────── */
+
+:root {
+  /* surfaces: dark graphite with a deep-blue undertone */
+  --bg-0: #06080d;
+  --bg-1: #0a0e16;
+  --bg-2: #0e1420;
+  --bg-3: #141c2c;
+
+  /* glass */
+  --glass: rgba(148, 163, 184, 0.05);
+  --glass-strong: rgba(148, 163, 184, 0.09);
+  --edge: rgba(148, 163, 184, 0.13);
+  --edge-soft: rgba(148, 163, 184, 0.07);
+
+  /* text */
+  --text-0: #e8eefa;
+  --text-1: #97a5bd;
+  --text-2: #5d6b84;
+
+  /* restrained accents */
+  --cyan: #3ee0ff;
+  --cyan-dim: rgba(62, 224, 255, 0.14);
+  --blue: #5a83ff;
+  --blue-dim: rgba(90, 131, 255, 0.14);
+  --amber: #ffb01f;
+  --amber-dim: rgba(255, 176, 31, 0.14);
+  --red: #ff4d5e;
+  --red-dim: rgba(255, 77, 94, 0.14);
+  --green: #35e39c;
+  --green-dim: rgba(53, 227, 156, 0.13);
+  --violet: #a78bff;
+  --violet-dim: rgba(167, 139, 255, 0.14);
+
+  /* typography */
+  --font-ui: var(--font-display), "Space Grotesk", system-ui, -apple-system,
+    sans-serif;
+  --font-code: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;
+
+  /* geometry */
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── base ──────────────────────────────────────────────────────────────── */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 700px at 50% -10%, rgba(50, 84, 160, 0.16), transparent 60%),
+    radial-gradient(900px 600px at 85% 110%, rgba(40, 120, 150, 0.08), transparent 55%),
+    var(--bg-0);
+  color: var(--text-0);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: rgba(62, 224, 255, 0.25);
+}
+
+/* subtle scanline grain so black areas don't feel flat */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.012) 0px,
+    rgba(255, 255, 255, 0.012) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  z-index: 1000;
+}
+
+/* ── shared primitives ─────────────────────────────────────────────────── */
+
+.panel {
+  background: linear-gradient(180deg, var(--glass-strong), var(--glass));
+  border: 1px solid var(--edge-soft);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  padding: 14px 16px 10px;
+}
+
+.panel-title .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+}
+
+.badge {
+  font-family: var(--font-code);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+}
+
+.badge-mock {
+  color: var(--amber);
+  border-color: rgba(255, 176, 31, 0.35);
+  background: var(--amber-dim);
+}
+
+/* ── shell layout ──────────────────────────────────────────────────────── */
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 1720px;
+  margin: 0 auto;
+  padding: 0 22px 22px;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 4px 14px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-sigil {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  box-shadow: 0 0 14px rgba(62, 224, 255, 0.6);
+  transform: rotate(45deg);
+}
+
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+}
+
+.shell-body {
+  flex: 1;
+}
+
+.placeholder {
+  color: var(--text-2);
+  padding: 40px;
+  text-align: center;
+}
+
+/* ── accessibility ─────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
