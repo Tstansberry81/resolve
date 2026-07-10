@@ -1,0 +1,63 @@
+{
+  "verified_on": "2026-07-10",
+  "policy": {
+    "pin_models_in_production": true,
+    "allow_preview_models": false,
+    "max_fallbacks": 1,
+    "independent_evaluator_family": true
+  },
+  "routes": {
+    "route_and_classify": {
+      "primary": {"provider": "openai", "model": "gpt-5.6-luna", "reasoning": "none"},
+      "fallback": {"provider": "anthropic", "model": "claude-haiku-4-5", "reasoning": "none"}
+    },
+    "extract_and_summarize": {
+      "primary": {"provider": "google", "model": "gemini-3.1-flash-lite", "reasoning": "low"},
+      "fallback": {"provider": "openai", "model": "gpt-5.6-luna", "reasoning": "low"}
+    },
+    "general_assistant": {
+      "primary": {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
+      "fallback": {"provider": "openai", "model": "gpt-5.6-terra", "reasoning": "medium"}
+    },
+    "goal_planner": {
+      "primary": {"provider": "openai", "model": "gpt-5.6-sol", "reasoning": "high"},
+      "fallback": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"}
+    },
+    "research": {
+      "primary": {"provider": "google", "model": "gemini-3.5-flash", "reasoning": "medium"},
+      "fallback": {"provider": "openai", "model": "gpt-5.6-terra", "reasoning": "medium"}
+    },
+    "research_synthesis": {
+      "primary": {"provider": "openai", "model": "gpt-5.6-sol", "reasoning": "high"},
+      "fallback": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"}
+    },
+    "coding_architect": {
+      "primary": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"},
+      "fallback": {"provider": "openai", "model": "gpt-5.6-sol", "reasoning": "high"}
+    },
+    "coding_implementer": {
+      "primary": {"provider": "openai", "model": "gpt-5.3-codex", "reasoning": "high"},
+      "fallback": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"}
+    },
+    "code_reviewer": {
+      "primary": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"},
+      "fallback": {"provider": "openai", "model": "gpt-5.6-sol", "reasoning": "high"}
+    },
+    "vision_and_documents": {
+      "primary": {"provider": "google", "model": "gemini-3.5-flash", "reasoning": "medium"},
+      "fallback": {"provider": "openai", "model": "gpt-5.6-terra", "reasoning": "medium"}
+    },
+    "high_stakes_evaluator": {
+      "primary": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"},
+      "fallback": {"provider": "openai", "model": "gpt-5.6-sol", "reasoning": "high"}
+    },
+    "realtime_voice": {
+      "primary": {"provider": "openai", "model": "gpt-realtime-1.5", "reasoning": "low"},
+      "fallback": null
+    },
+    "embeddings": {
+      "primary": {"provider": "openai", "model": "text-embedding-3-small", "reasoning": "none"},
+      "fallback": null
+    }
+  }
+}

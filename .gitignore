@@ -1,0 +1,21 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# node / next
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+
+# env and secrets
+.env
+.env.local
+.env*.local
+
+# os
+.DS_Store
