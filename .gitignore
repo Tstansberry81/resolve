@@ -11,6 +11,8 @@ node_modules/
 out/
 *.tsbuildinfo
 npm-debug.log*
+# lockfile excluded while pushes go through the GitHub API mirror; restore once direct git push works
+apps/dashboard/package-lock.json
 
 # env and secrets
 .env
