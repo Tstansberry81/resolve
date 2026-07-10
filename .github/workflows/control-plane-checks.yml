@@ -1,0 +1,31 @@
+name: control-plane checks
+
+on:
+  pull_request:
+    paths:
+      - "services/control_plane/**"
+      - "config/**"
+      - "infra/**"
+      - ".github/workflows/control-plane-checks.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/control_plane/**"
+      - "config/**"
+      - "infra/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/control_plane
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: pytest

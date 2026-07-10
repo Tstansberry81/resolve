@@ -1,0 +1,16 @@
+{
+  "strategy": "direct_for_core_composio_for_long_tail",
+  "connectors": {
+    "google": {"priority": 1, "auth": "oauth2", "services": ["gmail", "calendar", "drive", "docs", "sheets", "tasks", "maps"]},
+    "microsoft": {"priority": 1, "auth": "oauth2", "services": ["outlook", "calendar", "onedrive", "todo", "teams"]},
+    "notion": {"priority": 1, "auth": "oauth2_or_internal_integration", "services": ["pages", "databases", "search"]},
+    "github": {"priority": 1, "auth": "github_app", "services": ["repos", "issues", "pull_requests", "actions", "checks"]},
+    "telegram": {"priority": 1, "auth": "bot_token", "services": ["commands", "notifications", "voice", "files"]},
+    "canvas": {"priority": 2, "auth": "oauth2_or_personal_token", "services": ["courses", "assignments", "submissions", "announcements"]},
+    "search": {"priority": 2, "auth": "api_key", "services": ["openai_web_search", "exa", "tavily", "brave"]},
+    "browser": {"priority": 2, "auth": "isolated_session", "services": ["playwright", "browserbase"]},
+    "coding_sandbox": {"priority": 2, "auth": "api_key", "services": ["e2b", "daytona", "github_actions"]},
+    "storage": {"priority": 1, "auth": "service_role", "services": ["supabase_storage", "s3"]},
+    "long_tail": {"priority": 3, "auth": "composio", "services": ["spotify", "slack", "discord", "linear", "jira", "todoist", "dropbox", "box"]}
+  }
+}

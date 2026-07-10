@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "resolve-control-plane"
+version = "0.1.0"
+description = "Durable goal orchestration and policy control plane for RESOLVE"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "pydantic-settings>=2.8,<3",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "asyncpg>=0.30,<1",
+  "redis>=5.2,<6",
+  "httpx>=0.28,<1",
+  "structlog>=25.1,<26"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9", "ruff>=0.11,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/resolve_control_plane"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
