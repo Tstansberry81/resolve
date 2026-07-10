@@ -1,6 +1,8 @@
 "use client";
 
 import { useEngine, engine } from "@/lib/useEngine";
+import { CommandCore } from "@/components/CommandCore";
+import { MissionRail } from "@/components/MissionRail";
 
 function Clock() {
   return (
@@ -37,14 +39,8 @@ export default function CommandCenter() {
       </header>
 
       <section className="grid">
-        <div className="panel area-missions">
-          <div className="panel-title"><span className="dot" />Missions</div>
-          <p className="placeholder">{state.goals.length} goals tracked</p>
-        </div>
-        <div className="panel area-core">
-          <div className="panel-title"><span className="dot" />Command core</div>
-          <p className="placeholder">{state.orb} — {state.orbCaption}</p>
-        </div>
+        <MissionRail />
+        <CommandCore />
         <div className="panel area-constellation">
           <div className="panel-title"><span className="dot" />Agent constellation</div>
           <p className="placeholder">{state.activeNodes.length} nodes active</p>
