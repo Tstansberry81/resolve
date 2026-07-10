@@ -36,8 +36,8 @@
       "fallback": {"provider": "openai", "model": "gpt-5.6-sol", "reasoning": "high"}
     },
     "coding_implementer": {
-      "primary": {"provider": "openai", "model": "gpt-5.3-codex", "reasoning": "high"},
-      "fallback": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"}
+      "primary": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"},
+      "fallback": {"provider": "openai", "model": "gpt-5.3-codex", "reasoning": "high"}
     },
     "code_reviewer": {
       "primary": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"},
@@ -58,6 +58,10 @@
     "embeddings": {
       "primary": {"provider": "openai", "model": "text-embedding-3-small", "reasoning": "none"},
       "fallback": null
+    },
+    "executor": {
+      "primary": {"provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "high"},
+      "fallback": {"provider": "openai", "model": "gpt-5.6-sol", "reasoning": "high"}
     }
   }
 }
