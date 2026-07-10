@@ -2,42 +2,21 @@
 
 import { useEffect, useRef } from "react";
 import { engine, useEngine } from "@/lib/useEngine";
+import { AGENTS, AGENT_META, CONNECTORS, HIERARCHY_EDGES } from "@/lib/roster";
 import type { NodeId } from "@/lib/types";
 
-// Node layout: agents on an inner orbit, connectors on an outer orbit,
-// the core at center. Edges only light up when the engine emits them.
+// The real delegation tree, not decoration. Layout mirrors docs/DIRECTION.md:
+// you (the orb above) → assistant → [luna · sol · executor · coder · reviewer]
+// → connectors. Static edges show the hierarchy; they only light up when the
+// engine emits an actual handoff, and pulses travel in the delegation
+// direction. An input beam drops from the orb into the assistant while she's
+// listening/working.
 
-const AGENTS: { id: NodeId; label: string }[] = [
-  { id: "planner", label: "Planner" },
-  { id: "researcher", label: "Researcher" },
-  { id: "coder", label: "Coder" },
-  { id: "reviewer", label: "Reviewer" },
-  { id: "evaluator", label: "Evaluator" },
-];
-
-const CONNECTORS: { id: NodeId; label: string }[] = [
-  { id: "gmail", label: "Gmail" },
-  { id: "calendar", label: "Calendar" },
-  { id: "notion", label: "Notion" },
-  { id: "github", label: "GitHub" },
-  { id: "canvas", label: "Canvas" },
-  { id: "web", label: "Web" },
-];
-
-const ACCENT: Record<string, string> = {
-  planner: "#5a83ff",
-  researcher: "#a78bff",
-  coder: "#3ee0ff",
-  reviewer: "#ffb01f",
-  evaluator: "#35e39c",
-  core: "#3ee0ff",
-};
+const AGENT_ROW: NodeId[] = ["luna", "sol", "executor", "coder", "reviewer"];
 
 export function Constellation() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // subscribe so React keeps this mounted fresh, but the RAF loop reads
-  // straight from the engine to avoid re-render-per-frame
-  useEngine();
+  useEngine(); // keep mounted; RAF reads engine directly
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -53,7 +32,6 @@ export function Constellation() {
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      // ignore sub-pixel echoes so buffer writes can't feed a layout loop
       if (Math.abs(rect.width - w) < 1 && Math.abs(rect.height - h) < 1) return;
       w = rect.width;
       h = rect.height;
@@ -65,68 +43,103 @@ export function Constellation() {
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
-    const positions = (t: number) => {
-      const cx = w / 2;
-      const cy = h / 2 + 6;
-      const r1 = Math.min(w, h) * 0.24;
-      const r2 = Math.min(w, h) * 0.42;
-      const drift = reduced ? 0 : t * 0.00004;
+    const positions = () => {
       const pos = new Map<NodeId, { x: number; y: number }>();
-      pos.set("core", { x: cx, y: cy });
-      AGENTS.forEach((a, i) => {
-        const ang = drift + (i / AGENTS.length) * Math.PI * 2 - Math.PI / 2;
-        pos.set(a.id, { x: cx + Math.cos(ang) * r1, y: cy + Math.sin(ang) * r1 });
+      pos.set("assistant", { x: w / 2, y: h * 0.16 });
+      const span = Math.min(w * 0.86, 760);
+      const left = (w - span) / 2;
+      AGENT_ROW.forEach((id, i) => {
+        pos.set(id, { x: left + (span / (AGENT_ROW.length - 1)) * i, y: h * 0.52 });
       });
+      const cspan = Math.min(w * 0.7, 600);
+      const cleft = (w - cspan) / 2;
       CONNECTORS.forEach((c, i) => {
-        const ang = -drift * 0.7 + (i / CONNECTORS.length) * Math.PI * 2 - Math.PI / 3;
-        pos.set(c.id, { x: cx + Math.cos(ang) * r2, y: cy + Math.sin(ang) * r2 });
+        pos.set(c.id, { x: cleft + (cspan / (CONNECTORS.length - 1)) * i, y: h * 0.86 });
       });
       return pos;
+    };
+
+    const curve = (
+      p1: { x: number; y: number },
+      p2: { x: number; y: number },
+    ) => {
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      const midY = (p1.y + p2.y) / 2;
+      ctx.bezierCurveTo(p1.x, midY, p2.x, midY, p2.x, p2.y);
+      ctx.stroke();
+    };
+
+    const pointOnCurve = (
+      p1: { x: number; y: number },
+      p2: { x: number; y: number },
+      k: number,
+    ) => {
+      const midY = (p1.y + p2.y) / 2;
+      const c1 = { x: p1.x, y: midY };
+      const c2 = { x: p2.x, y: midY };
+      const u = 1 - k;
+      return {
+        x: u * u * u * p1.x + 3 * u * u * k * c1.x + 3 * u * k * k * c2.x + k * k * k * p2.x,
+        y: u * u * u * p1.y + 3 * u * u * k * c1.y + 3 * u * k * k * c2.y + k * k * k * p2.y,
+      };
     };
 
     const draw = (t: number) => {
       const state = engine.getSnapshot();
       const active = new Set(state.activeNodes);
-      const edge = state.activeEdge;
-      const pos = positions(t);
+      const hot = state.activeEdge;
+      const pos = positions();
       ctx.clearRect(0, 0, w, h);
 
-      // faint structural edges: core→agents
-      ctx.lineWidth = 1;
-      for (const a of AGENTS) {
-        const p1 = pos.get("core")!;
-        const p2 = pos.get(a.id)!;
-        ctx.strokeStyle = "rgba(148,163,184,0.07)";
+      // input beam: the orb (above this canvas) feeding the assistant
+      const a = pos.get("assistant")!;
+      const beamOn = state.orb !== "idle" && !state.emergencyStopped;
+      ctx.strokeStyle = beamOn ? "rgba(62,224,255,0.35)" : "rgba(148,163,184,0.08)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(a.x, 0);
+      ctx.lineTo(a.x, a.y - 14);
+      ctx.stroke();
+      if (beamOn && !reduced) {
+        const k = (t % 900) / 900;
+        ctx.fillStyle = "#3ee0ff";
+        ctx.shadowColor = "#3ee0ff";
+        ctx.shadowBlur = 8;
         ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
+        ctx.arc(a.x, (a.y - 14) * k, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
       }
 
-      // hot edge with traveling pulse
-      if (edge) {
-        const p1 = pos.get(edge.from);
-        const p2 = pos.get(edge.to);
+      // static hierarchy edges (the real reporting lines)
+      ctx.strokeStyle = "rgba(148,163,184,0.10)";
+      ctx.lineWidth = 1;
+      for (const [from, to] of HIERARCHY_EDGES) {
+        const p1 = pos.get(from);
+        const p2 = pos.get(to);
+        if (p1 && p2) curve(p1, p2);
+      }
+
+      // hot edge: an actual handoff in flight (any pair, incl. connectors)
+      if (hot) {
+        const p1 = pos.get(hot.from);
+        const p2 = pos.get(hot.to);
         if (p1 && p2) {
           const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
-          grad.addColorStop(0, "rgba(62,224,255,0.05)");
-          grad.addColorStop(1, "rgba(62,224,255,0.65)");
+          grad.addColorStop(0, "rgba(62,224,255,0.10)");
+          grad.addColorStop(1, "rgba(62,224,255,0.70)");
           ctx.strokeStyle = grad;
-          ctx.lineWidth = 1.4;
-          ctx.beginPath();
-          ctx.moveTo(p1.x, p1.y);
-          ctx.lineTo(p2.x, p2.y);
-          ctx.stroke();
-
+          ctx.lineWidth = 1.6;
+          curve(p1, p2);
           if (!reduced) {
-            const k = (t % 1200) / 1200;
-            const px = p1.x + (p2.x - p1.x) * k;
-            const py = p1.y + (p2.y - p1.y) * k;
+            const k = (t % 1100) / 1100;
+            const p = pointOnCurve(p1, p2, k);
             ctx.fillStyle = "#3ee0ff";
             ctx.shadowColor = "#3ee0ff";
             ctx.shadowBlur = 10;
             ctx.beginPath();
-            ctx.arc(px, py, 2.4, 0, Math.PI * 2);
+            ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
             ctx.fill();
             ctx.shadowBlur = 0;
           }
@@ -136,18 +149,18 @@ export function Constellation() {
       const drawNode = (
         id: NodeId,
         label: string,
-        kind: "core" | "agent" | "connector",
+        sub: string | null,
+        kind: "assistant" | "agent" | "connector",
       ) => {
         const p = pos.get(id)!;
-        const isActive = kind === "core" ? active.size > 0 : active.has(id);
-        const color = ACCENT[id] ?? "#97a5bd";
-        const r = kind === "core" ? 9 : kind === "agent" ? 6.5 : 4.5;
-        const pulse =
-          isActive && !reduced ? 1 + Math.sin(t * 0.006) * 0.18 : 1;
+        const isActive = active.has(id);
+        const color = AGENT_META[id]?.color ?? "#97a5bd";
+        const r = kind === "assistant" ? 10 : kind === "agent" ? 7 : 4.5;
+        const pulse = isActive && !reduced ? 1 + Math.sin(t * 0.006) * 0.16 : 1;
 
         if (isActive) {
           ctx.shadowColor = color;
-          ctx.shadowBlur = 16;
+          ctx.shadowBlur = 18;
         }
         ctx.fillStyle = isActive ? color : "rgba(93,107,132,0.55)";
         ctx.beginPath();
@@ -155,7 +168,6 @@ export function Constellation() {
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        // orbit ring on active
         if (isActive) {
           ctx.strokeStyle = `${color}44`;
           ctx.lineWidth = 1;
@@ -164,15 +176,23 @@ export function Constellation() {
           ctx.stroke();
         }
 
-        ctx.fillStyle = isActive ? "#e8eefa" : "#5d6b84";
-        ctx.font = `500 ${kind === "connector" ? 9.5 : 10.5}px var(--font-ui), sans-serif`;
         ctx.textAlign = "center";
-        ctx.fillText(label, p.x, p.y + r + 14);
+        ctx.fillStyle = isActive ? "#e8eefa" : "#5d6b84";
+        ctx.font = `600 ${kind === "connector" ? 9.5 : 11}px var(--font-ui), sans-serif`;
+        ctx.fillText(label, p.x, p.y + r + 15);
+        if (sub) {
+          ctx.fillStyle = isActive ? "#97a5bd" : "#3f4b61";
+          ctx.font = "500 8.5px var(--font-mono), monospace";
+          ctx.fillText(sub, p.x, p.y + r + 27);
+        }
       };
 
-      drawNode("core", "CORE", "core");
-      AGENTS.forEach((a) => drawNode(a.id, a.label, "agent"));
-      CONNECTORS.forEach((c) => drawNode(c.id, c.label, "connector"));
+      for (const ag of AGENTS) {
+        if (ag.id === "assistant") continue;
+        drawNode(ag.id, ag.label, ag.model, "agent");
+      }
+      drawNode("assistant", "Assistant", AGENT_META.assistant.model, "assistant");
+      CONNECTORS.forEach((c) => drawNode(c.id, c.label, null, "connector"));
 
       raf = requestAnimationFrame(draw);
     };
@@ -185,11 +205,7 @@ export function Constellation() {
   }, []);
 
   return (
-    <div className="panel area-constellation constellation">
-      <div className="panel-title">
-        <span className="dot" />
-        Agent constellation
-      </div>
+    <div className="constellation-v2">
       <canvas ref={canvasRef} className="constellation-canvas" />
     </div>
   );
