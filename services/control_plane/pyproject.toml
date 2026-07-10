@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "resolve-control-plane"
-version = "0.1.0"
+version = "0.2.0"
 description = "Durable goal orchestration and policy control plane for RESOLVE"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,7 +15,12 @@ dependencies = [
   "asyncpg>=0.30,<1",
   "redis>=5.2,<6",
   "httpx>=0.28,<1",
-  "structlog>=25.1,<26"
+  "structlog>=25.1,<26",
+  "requests>=2.32,<3",
+  "anthropic>=0.40",
+  "google-auth>=2.35,<3",
+  "google-api-python-client>=2.150,<3",
+  "anyio>=4,<5"
 ]
 
 [project.optional-dependencies]

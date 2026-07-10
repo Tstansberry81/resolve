@@ -45,8 +45,18 @@ class ControlPlaneTests(unittest.TestCase):
 
     def test_model_route_is_config_driven(self):
         route = model_choice("coding_implementer", config_dir=CONFIG)
-        self.assertEqual(route.provider, "openai")
+        self.assertEqual(route.provider, "anthropic")
+        self.assertEqual(route.model, "claude-opus-4-8")
         self.assertEqual(route.reasoning, "high")
+
+    def test_new_read_actions_allowed_in_execute_mode(self):
+        for action in ("calendar.read", "notion.tasks.read", "email.read"):
+            result = evaluate_tool_call(action, AutonomyMode.EXECUTE, config_dir=CONFIG)
+            self.assertEqual(result.decision, PolicyDecision.ALLOW, action)
+
+    def test_vault_append_is_reversible_write(self):
+        result = evaluate_tool_call("vault.append", AutonomyMode.EXECUTE, config_dir=CONFIG)
+        self.assertEqual(result.decision, PolicyDecision.ALLOW)
 
 
 if __name__ == "__main__":
