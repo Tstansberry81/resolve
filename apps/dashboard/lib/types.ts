@@ -1,12 +1,14 @@
 // Mirrors the control-plane domain (services/control_plane) so the real SSE
 // feed can replace the mock engine without touching components.
+// Agent roster per docs/DIRECTION.md: the assistant fronts everything.
 
 export type AgentId =
-  | "planner"
-  | "researcher"
+  | "assistant"
+  | "luna"
+  | "sol"
+  | "executor"
   | "coder"
   | "reviewer"
-  | "evaluator"
   | "core";
 
 export type ConnectorId =
