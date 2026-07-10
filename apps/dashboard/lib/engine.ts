@@ -59,6 +59,7 @@ const INITIAL_VITALS: Vitals = {
 
 class MockEngine {
   private state: EngineState = {
+    mode: "mock",
     orb: "idle",
     orbCaption: "Sonnet standing by",
     goals: [],

@@ -141,6 +141,13 @@ body::before {
   background: var(--amber-dim);
 }
 
+.badge-live {
+  color: var(--green);
+  border-color: rgba(53, 227, 156, 0.4);
+  background: var(--green-dim);
+  box-shadow: 0 0 12px rgba(53, 227, 156, 0.15);
+}
+
 /* ── shell layout ──────────────────────────────────────────────────────── */
 
 .shell {

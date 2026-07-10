@@ -7,31 +7,100 @@
     "max_parallel_tasks": 4
   },
   "risk_classes": {
-    "read": {"minimum_mode": "observe", "approval": "never"},
-    "draft": {"minimum_mode": "assist", "approval": "never"},
-    "simulate": {"minimum_mode": "assist", "approval": "never"},
-    "reversible_write": {"minimum_mode": "execute", "approval": "on_ambiguity"},
-    "bounded_external_write": {"minimum_mode": "autopilot", "approval": "on_ambiguity"},
-    "communication_send": {"minimum_mode": "execute", "approval": "always"},
-    "destructive": {"minimum_mode": "execute", "approval": "always"},
-    "financial": {"minimum_mode": "execute", "approval": "always"},
-    "credential_or_permission": {"minimum_mode": "autopilot", "approval": "always"}
+    "read": {
+      "minimum_mode": "observe",
+      "approval": "never"
+    },
+    "draft": {
+      "minimum_mode": "assist",
+      "approval": "never"
+    },
+    "simulate": {
+      "minimum_mode": "assist",
+      "approval": "never"
+    },
+    "reversible_write": {
+      "minimum_mode": "execute",
+      "approval": "on_ambiguity"
+    },
+    "bounded_external_write": {
+      "minimum_mode": "autopilot",
+      "approval": "on_ambiguity"
+    },
+    "communication_send": {
+      "minimum_mode": "execute",
+      "approval": "always"
+    },
+    "destructive": {
+      "minimum_mode": "execute",
+      "approval": "always"
+    },
+    "financial": {
+      "minimum_mode": "execute",
+      "approval": "always"
+    },
+    "credential_or_permission": {
+      "minimum_mode": "autopilot",
+      "approval": "always"
+    }
   },
   "overrides": {
-    "email.draft": {"risk": "draft"},
-    "email.send": {"risk": "communication_send"},
-    "calendar.create": {"risk": "reversible_write"},
-    "calendar.update": {"risk": "reversible_write"},
-    "calendar.delete": {"risk": "destructive"},
-    "notion.page.create": {"risk": "reversible_write"},
-    "notion.page.archive": {"risk": "destructive"},
-    "github.branch.create": {"risk": "reversible_write"},
-    "github.pull_request.create": {"risk": "bounded_external_write"},
-    "github.merge": {"risk": "destructive"},
-    "deployment.production": {"risk": "destructive"},
-    "finance.read": {"risk": "read"},
-    "finance.trade": {"risk": "financial"},
-    "purchase.create": {"risk": "financial"},
-    "secret.read": {"risk": "credential_or_permission"}
+    "email.draft": {
+      "risk": "draft"
+    },
+    "email.send": {
+      "risk": "communication_send"
+    },
+    "calendar.create": {
+      "risk": "reversible_write"
+    },
+    "calendar.update": {
+      "risk": "reversible_write"
+    },
+    "calendar.delete": {
+      "risk": "destructive"
+    },
+    "notion.page.create": {
+      "risk": "reversible_write"
+    },
+    "notion.page.archive": {
+      "risk": "destructive"
+    },
+    "github.branch.create": {
+      "risk": "reversible_write"
+    },
+    "github.pull_request.create": {
+      "risk": "bounded_external_write"
+    },
+    "github.merge": {
+      "risk": "destructive"
+    },
+    "deployment.production": {
+      "risk": "destructive"
+    },
+    "finance.read": {
+      "risk": "read"
+    },
+    "finance.trade": {
+      "risk": "financial"
+    },
+    "purchase.create": {
+      "risk": "financial"
+    },
+    "secret.read": {
+      "risk": "credential_or_permission"
+    },
+    "calendar.read": {
+      "risk": "read"
+    },
+    "notion.tasks.read": {
+      "risk": "read"
+    },
+    "email.read": {
+      "risk": "read"
+    },
+    "vault.append": {
+      "risk": "reversible_write"
+    }
   }
 }
