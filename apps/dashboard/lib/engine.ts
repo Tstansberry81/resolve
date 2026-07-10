@@ -59,6 +59,7 @@ const INITIAL_VITALS: Vitals = {
 
 class MockEngine {
   private state: EngineState = {
+    mode: "mock",
     orb: "idle",
     orbCaption: "Sonnet standing by",
     goals: [],
@@ -84,7 +85,7 @@ class MockEngine {
     { onApprove: Action[]; onReject: Action[]; resume: () => void }
   >();
 
-  // ── store contract ────────────────────────────────────────────
+  // ── store contract ──────────────────────────────────────────────────
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -99,7 +100,7 @@ class MockEngine {
     this.listeners.forEach((fn) => fn());
   }
 
-  // ── lifecycle ─────────────────────────────────────────────────
+  // ── lifecycle ─────────────────────────────────────────────────────────
 
   private start() {
     if (this.started || typeof window === "undefined") return;
@@ -277,7 +278,7 @@ class MockEngine {
     });
   }
 
-  // ── user actions ──────────────────────────────────────────────
+  // ── user actions ─────────────────────────────────────────────────────
 
   decideApproval = (id: string, decision: "approved" | "rejected") => {
     const gate = this.gates.get(id);

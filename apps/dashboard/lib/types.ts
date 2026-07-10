@@ -115,6 +115,7 @@ export interface Vitals {
 }
 
 export interface EngineState {
+  mode: "mock" | "live";
   orb: OrbState;
   orbCaption: string;
   goals: Goal[];

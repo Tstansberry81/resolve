@@ -31,7 +31,11 @@ export default function CommandCenter() {
           <div className="brand">
             <span className="brand-sigil" aria-hidden />
             <span className="brand-name">RESOLVE</span>
+            {state.mode === "live" ? (
+            <span className="badge badge-live">LIVE</span>
+          ) : (
             <span className="badge badge-mock">MOCK DATA</span>
+          )}
           </div>
           <div className="header-right">
             <span className="badge">autonomy · execute</span>

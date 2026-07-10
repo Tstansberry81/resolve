@@ -46,7 +46,7 @@
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ── base ──────────────────────────────────────────────────── */
+/* ── base ────────────────────────────────────────────────────────── */
 
 * {
   box-sizing: border-box;
@@ -92,7 +92,7 @@ body::before {
   z-index: 1000;
 }
 
-/* ── shared primitives ─────────────────────────────────────────── */
+/* ── shared primitives ───────────────────────────────────────────── */
 
 .panel {
   background: linear-gradient(180deg, var(--glass-strong), var(--glass));
@@ -141,7 +141,14 @@ body::before {
   background: var(--amber-dim);
 }
 
-/* ── shell layout ────────────────────────────────────────────── */
+.badge-live {
+  color: var(--green);
+  border-color: rgba(53, 227, 156, 0.4);
+  background: var(--green-dim);
+  box-shadow: 0 0 12px rgba(53, 227, 156, 0.15);
+}
+
+/* ── shell layout ────────────────────────────────────────────────── */
 
 .shell {
   min-height: 100vh;
@@ -240,7 +247,7 @@ body::before {
   background: var(--green-dim);
 }
 
-/* ── command-center grid ───────────────────────────────────────── */
+/* ── command-center grid ─────────────────────────────────────────── */
 
 .grid {
   flex: 1;
@@ -312,7 +319,7 @@ body::before {
   font-size: 12px;
 }
 
-/* ── command core ──────────────────────────────────────────────── */
+/* ── command core ────────────────────────────────────────────────── */
 
 .core {
   display: flex;
@@ -504,7 +511,7 @@ body::before {
   cursor: not-allowed;
 }
 
-/* ── mission rail ────────────────────────────────────────────── */
+/* ── mission rail ────────────────────────────────────────────────── */
 
 .count {
   margin-left: auto;
@@ -639,7 +646,7 @@ body::before {
 
 .mission-blocker { color: var(--amber); }
 
-/* ── constellation ───────────────────────────────────────────── */
+/* ── constellation ───────────────────────────────────────────────── */
 
 .constellation {
   display: flex;
@@ -661,7 +668,7 @@ body::before {
   min-height: 300px;
 }
 
-/* ── timeline ────────────────────────────────────────────────── */
+/* ── timeline ────────────────────────────────────────────────────── */
 
 .timeline {
   min-height: 0;
@@ -764,7 +771,7 @@ body::before {
   border: 1px solid var(--edge-soft);
 }
 
-/* ── approvals ───────────────────────────────────────────────── */
+/* ── approvals ───────────────────────────────────────────────────── */
 
 .approvals { min-height: 0; }
 
@@ -865,7 +872,7 @@ body::before {
 .approval-approved { color: var(--green); }
 .approval-rejected { color: var(--red); }
 
-/* ── vitals ──────────────────────────────────────────────────── */
+/* ── vitals ──────────────────────────────────────────────────────── */
 
 .vitals { min-height: 0; }
 
@@ -982,7 +989,7 @@ body::before {
   flex: none;
 }
 
-/* ── artifacts ───────────────────────────────────────────────── */
+/* ── artifacts ───────────────────────────────────────────────────── */
 
 .artifacts { min-height: 0; }
 
@@ -1021,7 +1028,7 @@ body::before {
   color: var(--text-2);
 }
 
-/* ── v2 layout: starfield, corners, sidebar, banners ─────────────────── */
+/* ── v2 layout: starfield, corners, sidebar, banners ───────────────────── */
 
 .starfield {
   position: fixed;
@@ -1073,7 +1080,7 @@ body::before {
   .v2-center { padding: 0 20px; }
 }
 
-/* ── command core v2: frameless, center-top ────────────────────────── */
+/* ── command core v2: frameless, center-top ────────────────────────────── */
 
 .core-v2 {
   display: flex;
@@ -1120,7 +1127,7 @@ body::before {
   flex: 1 1 auto;
 }
 
-/* ── sidebar dropdowns ─────────────────────────────────────────── */
+/* ── sidebar dropdowns ───────────────────────────────────────────── */
 
 .sidebar {
   width: 300px;
@@ -1183,7 +1190,7 @@ body::before {
 .drop-body::-webkit-scrollbar { width: 4px; }
 .drop-body::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 2px; }
 
-/* ── approval banners (iOS style, top center) ──────────────────────── */
+/* ── approval banners (iOS style, top center) ──────────────────────────── */
 
 .banner-stack {
   position: fixed;
@@ -1307,7 +1314,7 @@ body::before {
 .banner-approved { color: var(--green); }
 .banner-rejected { color: var(--red); }
 
-/* ── vitals dropdown (top left) ──────────────────────────────────── */
+/* ── vitals dropdown (top left) ────────────────────────────────────── */
 
 .vitals-drop {
   position: relative;
@@ -1432,7 +1439,7 @@ body::before {
   flex: none;
 }
 
-/* ── artifacts: bottom-right corner window ─────────────────────────── */
+/* ── artifacts: bottom-right corner window ─────────────────────────────── */
 
 .artifacts-corner {
   position: fixed;
@@ -1445,7 +1452,7 @@ body::before {
   flex-direction: column;
 }
 
-/* ── v2 responsive ───────────────────────────────────────────── */
+/* ── v2 responsive ───────────────────────────────────────────────── */
 
 @media (max-width: 1100px) {
   .v2-app { height: auto; min-height: 100vh; overflow: visible; }
@@ -1455,7 +1462,7 @@ body::before {
   .artifacts-corner { position: static; width: auto; max-height: none; margin: 12px 14px 20px; }
 }
 
-/* ── accessibility ───────────────────────────────────────────── */
+/* ── accessibility ───────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
   *,
