@@ -180,14 +180,125 @@ body::before {
   letter-spacing: 0.34em;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.clock {
+  font-family: var(--font-code);
+  font-size: 13px;
+  color: var(--text-1);
+  letter-spacing: 0.06em;
+}
+
+.btn {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--edge);
+  background: var(--glass-strong);
+  color: var(--text-0);
+  cursor: pointer;
+  transition: all 0.18s var(--ease-out);
+}
+
+.btn:hover {
+  border-color: var(--edge);
+  background: var(--bg-3);
+}
+
+.btn-stop {
+  color: var(--red);
+  border-color: rgba(255, 77, 94, 0.4);
+  background: var(--red-dim);
+}
+
+.btn-stop:hover {
+  background: rgba(255, 77, 94, 0.24);
+  box-shadow: 0 0 18px rgba(255, 77, 94, 0.25);
+}
+
+.btn-resume {
+  color: var(--green);
+  border-color: rgba(53, 227, 156, 0.4);
+  background: var(--green-dim);
+}
+
+/* ── command-center grid ───────────────────────────────────────────────── */
+
+.grid {
+  flex: 1;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 300px 1fr 1fr 320px;
+  grid-template-rows: minmax(300px, 1.25fr) minmax(240px, 1fr);
+  grid-template-areas:
+    "missions core constellation approvals"
+    "missions timeline timeline vitals-artifacts";
+  min-height: 0;
+}
+
+.area-missions { grid-area: missions; display: flex; flex-direction: column; }
+.area-core { grid-area: core; }
+.area-constellation { grid-area: constellation; }
+.area-approvals { grid-area: approvals; display: flex; flex-direction: column; }
+.area-timeline { grid-area: timeline; display: flex; flex-direction: column; }
+
+.vitals-stack {
+  grid-area: vitals-artifacts;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 14px;
+  min-height: 0;
+}
+
+.area-vitals,
+.area-artifacts {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+@media (max-width: 1280px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+    grid-template-areas:
+      "core core"
+      "missions constellation"
+      "approvals vitals-artifacts"
+      "timeline timeline";
+  }
+}
+
+@media (max-width: 760px) {
+  .grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "core"
+      "missions"
+      "approvals"
+      "timeline"
+      "constellation"
+      "vitals-artifacts";
+  }
+}
+
 .shell-body {
   flex: 1;
 }
 
 .placeholder {
   color: var(--text-2);
-  padding: 40px;
+  padding: 24px;
   text-align: center;
+  font-family: var(--font-code);
+  font-size: 12px;
 }
 
 /* ── accessibility ─────────────────────────────────────────────────────── */
