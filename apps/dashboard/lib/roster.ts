@@ -61,6 +61,7 @@ export const AGENT_META: Record<string, AgentMeta> = Object.fromEntries(
 );
 
 export const CONNECTORS: { id: ConnectorId; label: string }[] = [
+  { id: "vault", label: "Vault" },
   { id: "gmail", label: "Gmail" },
   { id: "calendar", label: "Calendar" },
   { id: "notion", label: "Notion" },

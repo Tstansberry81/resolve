@@ -12,6 +12,7 @@ export type AgentId =
   | "core";
 
 export type ConnectorId =
+  | "vault"
   | "gmail"
   | "calendar"
   | "notion"

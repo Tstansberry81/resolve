@@ -34,6 +34,7 @@ function lcg(seed: number) {
 
 const INITIAL_VITALS: Vitals = {
   connectors: [
+    { id: "vault", label: "Vault (GitHub)", status: "healthy", latencyMs: 350 },
     { id: "gmail", label: "Gmail", status: "healthy", latencyMs: 210 },
     { id: "calendar", label: "Calendar", status: "healthy", latencyMs: 160 },
     { id: "notion", label: "Notion", status: "healthy", latencyMs: 240 },
