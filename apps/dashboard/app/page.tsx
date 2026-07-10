@@ -3,6 +3,8 @@
 import { useEngine, engine } from "@/lib/useEngine";
 import { CommandCore } from "@/components/CommandCore";
 import { MissionRail } from "@/components/MissionRail";
+import { Constellation } from "@/components/Constellation";
+import { Timeline } from "@/components/Timeline";
 
 function Clock() {
   return (
@@ -41,20 +43,14 @@ export default function CommandCenter() {
       <section className="grid">
         <MissionRail />
         <CommandCore />
-        <div className="panel area-constellation">
-          <div className="panel-title"><span className="dot" />Agent constellation</div>
-          <p className="placeholder">{state.activeNodes.length} nodes active</p>
-        </div>
+        <Constellation />
         <div className="panel area-approvals">
           <div className="panel-title"><span className="dot" />Approvals</div>
           <p className="placeholder">
             {state.approvals.filter((a) => a.status === "pending").length} pending
           </p>
         </div>
-        <div className="panel area-timeline">
-          <div className="panel-title"><span className="dot" />Live execution</div>
-          <p className="placeholder">{state.events.length} events</p>
-        </div>
+        <Timeline />
         <div className="vitals-stack">
           <div className="panel area-vitals">
             <div className="panel-title"><span className="dot" />System vitals</div>
