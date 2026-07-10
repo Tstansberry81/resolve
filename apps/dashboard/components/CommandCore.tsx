@@ -23,14 +23,10 @@ export function CommandCore() {
   };
 
   return (
-    <div className="panel area-core core">
-      <div className="panel-title">
-        <span className="dot" />
-        Command core
-        <span className="core-state" data-state={orb}>
-          {STATE_LABEL[orb]}
-        </span>
-      </div>
+    <div className="core-v2">
+      <span className="core-state" data-state={orb}>
+        {STATE_LABEL[orb]}
+      </span>
 
       <div className="orb-stage" data-state={orb}>
         <div className="orb-halo" />
@@ -66,7 +62,7 @@ export function CommandCore() {
           placeholder={
             emergencyStopped
               ? "Execution halted — resume to issue commands"
-              : "Give RESOLVE a goal…"
+              : "Tell Sonnet what you need…"
           }
           disabled={emergencyStopped}
           aria-label="Command input"

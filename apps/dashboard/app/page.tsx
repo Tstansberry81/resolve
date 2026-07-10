@@ -1,12 +1,12 @@
 "use client";
 
 import { useEngine, engine } from "@/lib/useEngine";
+import { Starfield } from "@/components/Starfield";
 import { CommandCore } from "@/components/CommandCore";
-import { MissionRail } from "@/components/MissionRail";
 import { Constellation } from "@/components/Constellation";
-import { Timeline } from "@/components/Timeline";
-import { ApprovalInbox } from "@/components/ApprovalInbox";
-import { Vitals } from "@/components/Vitals";
+import { Sidebar } from "@/components/Sidebar";
+import { ApprovalBanners } from "@/components/ApprovalBanners";
+import { VitalsDropdown } from "@/components/VitalsDropdown";
 import { ArtifactsDock } from "@/components/ArtifactsDock";
 
 function Clock() {
@@ -21,39 +21,43 @@ export default function CommandCenter() {
   const state = useEngine();
 
   return (
-    <main className="shell">
-      <header className="shell-header">
-        <div className="brand">
-          <span className="brand-sigil" aria-hidden />
-          <span className="brand-name">RESOLVE</span>
-          <span className="badge badge-mock">MOCK DATA</span>
-        </div>
-        <div className="header-right">
-          <span className="badge">autonomy · execute</span>
-          <Clock />
-          {state.emergencyStopped ? (
-            <button className="btn btn-resume" onClick={() => engine.resume()}>
-              RESUME
-            </button>
-          ) : (
-            <button className="btn btn-stop" onClick={() => engine.emergencyStop()}>
-              EMERGENCY STOP
-            </button>
-          )}
-        </div>
-      </header>
+    <>
+      <Starfield />
+      <ApprovalBanners />
 
-      <section className="grid">
-        <MissionRail />
-        <CommandCore />
-        <Constellation />
-        <ApprovalInbox />
-        <Timeline />
-        <div className="vitals-stack">
-          <Vitals />
-          <ArtifactsDock />
+      <main className="v2-app">
+        <header className="v2-header">
+          <VitalsDropdown />
+          <div className="brand">
+            <span className="brand-sigil" aria-hidden />
+            <span className="brand-name">RESOLVE</span>
+            <span className="badge badge-mock">MOCK DATA</span>
+          </div>
+          <div className="header-right">
+            <span className="badge">autonomy · execute</span>
+            <Clock />
+            {state.emergencyStopped ? (
+              <button className="btn btn-resume" onClick={() => engine.resume()}>
+                RESUME
+              </button>
+            ) : (
+              <button className="btn btn-stop" onClick={() => engine.emergencyStop()}>
+                EMERGENCY STOP
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="v2-main">
+          <Sidebar />
+          <section className="v2-center">
+            <CommandCore />
+            <Constellation />
+          </section>
         </div>
-      </section>
-    </main>
+      </main>
+
+      <ArtifactsDock />
+    </>
   );
 }

@@ -8,8 +8,10 @@ import type {
   Vitals,
 } from "./types";
 
-// Scripted, deterministic scenarios modeled on the "first production goals"
-// in docs/JARVIS_SYSTEM_PLAN.md §14.
+// Scripted, deterministic scenarios. Flow per docs/DIRECTION.md:
+// every input goes through the assistant (Sonnet); she handles menial work
+// herself and delegates planning to Sol, heavy agentic work to the Executor,
+// and code to the Coder + Reviewer. Luna routes/classifies up front.
 
 export type Action =
   | { kind: "orb"; state: OrbState; caption: string }
@@ -77,13 +79,13 @@ const orb = (state: OrbState, caption: string): Action => ({
 
 const nodes = (...ids: NodeId[]): Action => ({ kind: "nodes", ids });
 
-// ── scenario 1: morning briefing (read-only) ─────────────────────────────
+// ── scenario 1: morning briefing — menial, the assistant handles it alone ─
 
 function briefing(id = "g-briefing"): Scenario {
   return {
     goal: {
       id,
-      objective: "Morning briefing: agenda, inbox triage, market snapshot",
+      objective: "Morning briefing: agenda, inbox scan, market snapshot",
       category: "personal",
       status: "planning",
       autonomyMode: "observe",
@@ -91,50 +93,49 @@ function briefing(id = "g-briefing"): Scenario {
       budgetUsd: 0.5,
       spentUsd: 0,
       deadline: null,
-      nextAction: "Compile plan",
+      nextAction: "Route request",
       blocker: null,
     },
     steps: [
-      { at: 0, action: orb("thinking", "Planning the morning briefing") },
-      { at: 0.2, action: nodes("planner") },
+      { at: 0, action: orb("thinking", "Sonnet is sizing up the morning") },
+      { at: 0.2, action: nodes("assistant", "luna") },
       {
         at: 0.4,
-        action: ev(id, "planner", "plan.created", "Plan v1: 4 read-only tasks", {
-          detail: "calendar.read → gmail.triage → markets.read → synthesize",
+        action: ev(id, "luna", "route.classified", "Routed: menial · assistant handles it directly", {
+          edge: { from: "assistant", to: "luna" },
+          detail: "gpt-5.6-luna · no plan needed, read-only",
         }),
       },
       { at: 1.5, action: goal(id, { status: "active", progress: 0.1, nextAction: "Read calendar" }) },
-      { at: 1.6, action: orb("executing", "Reading today's calendar") },
-      { at: 1.7, action: nodes("planner", "calendar") },
+      { at: 1.6, action: orb("executing", "Sonnet is reading today's calendar") },
+      { at: 1.7, action: nodes("assistant", "calendar") },
       {
         at: 2,
-        action: ev(id, "calendar", "tool.call", "calendar.read — 4 events today", {
-          edge: { from: "planner", to: "calendar" },
+        action: ev(id, "assistant", "tool.call", "calendar.read — 4 events today", {
+          edge: { from: "assistant", to: "calendar" },
           detail: "ECON 2010 lecture 10:00 · gym 17:30 · 2 more",
         }),
       },
-      { at: 5, action: nodes("planner", "gmail") },
+      { at: 5, action: nodes("assistant", "gmail") },
       {
         at: 5.2,
-        action: ev(id, "gmail", "tool.call", "gmail.triage — 23 unread, 3 need action", {
-          edge: { from: "planner", to: "gmail" },
+        action: ev(id, "assistant", "tool.call", "gmail.scan — 23 unread, 3 need action", {
+          edge: { from: "assistant", to: "gmail" },
           detail: "flagged: advisor reply, Canvas due-date change, Render invoice",
         }),
       },
       { at: 7.5, action: goal(id, { progress: 0.55, nextAction: "Market snapshot" }) },
-      { at: 8, action: nodes("planner", "web") },
+      { at: 8, action: nodes("assistant", "web") },
       {
         at: 8.2,
-        action: ev(id, "web", "tool.call", "markets.read — SPY +0.4%, BTC flat", {
-          edge: { from: "planner", to: "web" },
+        action: ev(id, "assistant", "tool.call", "markets.read — SPY +0.4%, BTC flat", {
+          edge: { from: "assistant", to: "web" },
         }),
       },
-      { at: 10.5, action: nodes("planner", "evaluator") },
       {
         at: 10.8,
-        action: ev(id, "evaluator", "verify.passed", "Coverage check: all 3 sources present", {
+        action: ev(id, "assistant", "briefing.compiled", "Briefing assembled from all 3 sources", {
           level: "success",
-          edge: { from: "planner", to: "evaluator" },
         }),
       },
       {
@@ -150,20 +151,20 @@ function briefing(id = "g-briefing"): Scenario {
           },
         },
       },
-      { at: 11.8, action: goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 0.07 }) },
+      { at: 11.8, action: goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 0.05 }) },
       {
         at: 12,
-        action: ev(id, "core", "goal.completed", "Briefing delivered — $0.07 of $0.50 budget", {
+        action: ev(id, "core", "goal.completed", "Briefing delivered — $0.05 of $0.50 budget", {
           level: "success",
         }),
       },
-      { at: 12.2, action: orb("idle", "Standing by") },
+      { at: 12.2, action: orb("idle", "Sonnet standing by") },
       { at: 12.3, action: nodes() },
     ],
   };
 }
 
-// ── scenario 2: study guide ───────────────────────────────────────────────
+// ── scenario 2: study guide — large project, Sol plans, Executor works ────
 
 function studyGuide(id = "g-econ"): Scenario {
   return {
@@ -177,66 +178,76 @@ function studyGuide(id = "g-econ"): Scenario {
       budgetUsd: 3,
       spentUsd: 0,
       deadline: "Fri 18:00",
-      nextAction: "Collect sources",
+      nextAction: "Hand to Sol",
       blocker: null,
     },
     steps: [
-      { at: 0, action: orb("thinking", "Decomposing the study-guide goal") },
-      { at: 0.1, action: nodes("planner") },
+      { at: 0, action: orb("thinking", "Sonnet is briefing Sol on the project") },
+      { at: 0.1, action: nodes("assistant", "sol") },
       {
         at: 0.5,
-        action: ev(id, "planner", "plan.created", "Plan v1: 7-task DAG with citation gate", {
+        action: ev(id, "assistant", "delegate.plan", "Large project — handed to Sol for planning", {
+          edge: { from: "assistant", to: "sol" },
+        }),
+      },
+      {
+        at: 2,
+        action: ev(id, "sol", "plan.created", "Sol: 7-task DAG with citation gate", {
           detail: "collect → extract → outline → synthesize → cite-check → quiz → coverage eval",
         }),
       },
-      { at: 2, action: goal(id, { status: "active", progress: 0.08 }) },
-      { at: 2.1, action: orb("executing", "Collecting course sources") },
-      { at: 2.2, action: nodes("researcher", "canvas") },
+      { at: 2.2, action: goal(id, { status: "active", progress: 0.08, nextAction: "Executor collects sources" }) },
+      { at: 2.3, action: orb("executing", "Executor is collecting course sources") },
+      { at: 2.4, action: nodes("sol", "executor", "canvas") },
       {
-        at: 2.5,
-        action: ev(id, "researcher", "tool.call", "canvas.files — 3 lecture decks, 2 PDFs", {
-          edge: { from: "researcher", to: "canvas" },
+        at: 2.6,
+        action: ev(id, "sol", "delegate.execute", "Plan dispatched to the Executor", {
+          edge: { from: "sol", to: "executor" },
+        }),
+      },
+      {
+        at: 3.2,
+        action: ev(id, "executor", "tool.call", "canvas.files — 3 lecture decks, 2 PDFs", {
+          edge: { from: "executor", to: "canvas" },
         }),
       },
       {
         at: 6,
-        action: ev(id, "researcher", "extract.done", "Extracted 148 passages with provenance", {
-          detail: "model: gemini-3.1-flash-lite · $0.11",
+        action: ev(id, "executor", "extract.done", "Extracted 148 passages with provenance", {
+          detail: "claude-opus-4-8 · $0.14",
         }),
       },
-      { at: 6.2, action: goal(id, { progress: 0.35, nextAction: "Synthesize outline", spentUsd: 0.11 }) },
-      { at: 8.5, action: nodes("researcher", "planner") },
+      { at: 6.2, action: goal(id, { progress: 0.35, nextAction: "Synthesize outline", spentUsd: 0.14 }) },
       {
         at: 9,
-        action: ev(id, "planner", "synthesis.done", "Outline synthesized across 3 chapters", {
-          detail: "model: gpt-5.6-sol · high effort",
-          edge: { from: "planner", to: "researcher" },
+        action: ev(id, "executor", "synthesis.done", "Outline synthesized across 3 chapters", {
+          detail: "high effort · every claim source-linked",
         }),
       },
-      { at: 12, action: nodes("evaluator") },
+      { at: 12, action: nodes("executor", "reviewer") },
       {
         at: 12.5,
-        action: ev(id, "evaluator", "verify.failed", "Citation check: 2 claims missing sources", {
+        action: ev(id, "reviewer", "verify.failed", "Citation check: 2 claims missing sources", {
           level: "warn",
           detail: "elasticity example (ch.4), tax incidence figure (ch.5)",
-          edge: { from: "evaluator", to: "researcher" },
+          edge: { from: "reviewer", to: "executor" },
         }),
       },
-      { at: 13, action: goal(id, { progress: 0.55, nextAction: "Repair citations", blocker: null }) },
-      { at: 15.5, action: nodes("researcher", "canvas") },
+      { at: 13, action: goal(id, { progress: 0.55, nextAction: "Repair citations" }) },
+      { at: 15.5, action: nodes("executor", "canvas") },
       {
         at: 16,
-        action: ev(id, "researcher", "repair.done", "Both claims re-sourced from lecture 9", {
+        action: ev(id, "executor", "repair.done", "Both claims re-sourced from lecture 9", {
           level: "success",
-          edge: { from: "researcher", to: "canvas" },
+          edge: { from: "executor", to: "canvas" },
         }),
       },
-      { at: 18.5, action: nodes("evaluator") },
+      { at: 18.5, action: nodes("reviewer") },
       {
         at: 19,
-        action: ev(id, "evaluator", "verify.passed", "Citation + coverage checks green · quiz validates", {
+        action: ev(id, "reviewer", "verify.passed", "Citation + coverage checks green · quiz validates", {
           level: "success",
-          edge: { from: "evaluator", to: "planner" },
+          edge: { from: "reviewer", to: "executor" },
         }),
       },
       {
@@ -252,20 +263,21 @@ function studyGuide(id = "g-econ"): Scenario {
           },
         },
       },
-      { at: 20.4, action: goal(id, { status: "completed", progress: 1, spentUsd: 1.84, nextAction: "—" }) },
+      { at: 20.4, action: goal(id, { status: "completed", progress: 1, spentUsd: 1.92, nextAction: "—" }) },
       {
         at: 20.6,
-        action: ev(id, "core", "goal.completed", "Study guide saved to Notion — $1.84 of $3.00", {
+        action: ev(id, "assistant", "goal.completed", "Sonnet: study guide saved to Notion — $1.92 of $3.00", {
           level: "success",
+          edge: { from: "assistant", to: "notion" },
         }),
       },
-      { at: 21, action: orb("idle", "Standing by") },
+      { at: 21, action: orb("idle", "Sonnet standing by") },
       { at: 21.1, action: nodes() },
     ],
   };
 }
 
-// ── scenario 3: bug-fix draft PR ──────────────────────────────────────────
+// ── scenario 3: bug fix — Sol plans, Coder implements, Reviewer gates ─────
 
 function bugfix(id = "g-bugfix"): Scenario {
   return {
@@ -279,30 +291,43 @@ function bugfix(id = "g-bugfix"): Scenario {
       budgetUsd: 5,
       spentUsd: 0,
       deadline: null,
-      nextAction: "Reproduce",
+      nextAction: "Hand to Sol",
       blocker: null,
     },
     steps: [
-      { at: 0, action: orb("thinking", "Reading the failing repo") },
-      { at: 0.1, action: nodes("coder", "github") },
+      { at: 0, action: orb("thinking", "Sonnet is scoping the bug with Sol") },
+      { at: 0.1, action: nodes("assistant", "sol") },
       {
-        at: 0.4,
+        at: 0.3,
+        action: ev(id, "assistant", "delegate.plan", "Coding goal — Sol architects the fix", {
+          edge: { from: "assistant", to: "sol" },
+        }),
+      },
+      {
+        at: 1.4,
+        action: ev(id, "sol", "plan.created", "Sol: reproduce → fix → tests → independent review → draft PR", {
+          detail: "merge explicitly withheld pending your approval",
+        }),
+      },
+      { at: 1.6, action: nodes("sol", "coder", "github") },
+      {
+        at: 1.8,
         action: ev(id, "coder", "tool.call", "github.checkout — isolated worktree created", {
           edge: { from: "coder", to: "github" },
         }),
       },
       {
-        at: 3,
+        at: 3.4,
         action: ev(id, "coder", "repro.confirmed", "Reproduced: stale lock persists after SIGKILL", {
           detail: "test_sync.py::test_lock_recovery fails as expected",
         }),
       },
-      { at: 3.2, action: goal(id, { status: "active", progress: 0.3, nextAction: "Implement fix" }) },
-      { at: 3.3, action: orb("executing", "Implementing lock-recovery fix") },
+      { at: 3.6, action: goal(id, { status: "active", progress: 0.3, nextAction: "Implement fix" }) },
+      { at: 3.7, action: orb("executing", "Coder is implementing the lock-recovery fix") },
       {
         at: 7,
         action: ev(id, "coder", "commit.created", "Fix: detect and clear stale index.lock with age guard", {
-          detail: "model: gpt-5.3-codex · 2 files, +38 −6",
+          detail: "claude-opus-4-8 · 2 files, +38 −6",
         }),
       },
       { at: 9.5, action: ev(id, "coder", "tests.running", "Running unit + integration suites") },
@@ -316,10 +341,9 @@ function bugfix(id = "g-bugfix"): Scenario {
       { at: 12.4, action: nodes("coder", "reviewer") },
       {
         at: 14.5,
-        action: ev(id, "reviewer", "review.done", "Reviewer (opus-4-8): approve with 1 nit — race window comment", {
+        action: ev(id, "reviewer", "review.done", "Reviewer: approve with 1 nit — race window comment", {
           level: "success",
-          edge: { from: "reviewer", to: "coder" },
-          detail: "different model family from implementer, per policy",
+          edge: { from: "coder", to: "reviewer" },
         }),
       },
       { at: 17, action: nodes("coder", "github") },
@@ -346,7 +370,7 @@ function bugfix(id = "g-bugfix"): Scenario {
         at: 18,
         action: goal(id, { status: "waiting_approval", progress: 0.9, nextAction: "Awaiting merge decision", blocker: "Needs your approval" }),
       },
-      { at: 18.2, action: orb("waiting", "Waiting on merge approval") },
+      { at: 18.2, action: orb("waiting", "Sonnet is waiting on your merge decision") },
       {
         at: 18.4,
         action: {
@@ -370,13 +394,13 @@ function bugfix(id = "g-bugfix"): Scenario {
           onApprove: [
             ev(id, "github", "pr.merged", "PR #7 merged to main", { level: "success" }),
             goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 2.6, blocker: null }),
-            orb("idle", "Standing by"),
+            orb("idle", "Sonnet standing by"),
             nodes(),
           ],
           onReject: [
-            ev(id, "core", "pr.held", "Merge rejected — PR stays in draft", { level: "warn" }),
+            ev(id, "assistant", "pr.held", "Sonnet: merge rejected — PR stays in draft", { level: "warn" }),
             goal(id, { status: "completed", progress: 0.95, nextAction: "PR awaiting manual merge", spentUsd: 2.6, blocker: null }),
-            orb("idle", "Standing by"),
+            orb("idle", "Sonnet standing by"),
             nodes(),
           ],
         },
@@ -385,90 +409,100 @@ function bugfix(id = "g-bugfix"): Scenario {
   };
 }
 
-// ── scenario 4: email follow-ups ──────────────────────────────────────────
+// ── scenario 4: inbox triage + outreach blast — Executor's showcase ───────
 
-function emailFollowups(id = "g-email"): Scenario {
+function emailBlast(id = "g-email"): Scenario {
   return {
     goal: {
       id,
-      objective: "Draft follow-ups for 3 stale threads; send only with approval",
+      objective: "Triage the inbox and draft the outreach blast — send needs approval",
       category: "email",
       status: "planning",
       autonomyMode: "execute",
       progress: 0.02,
-      budgetUsd: 1,
+      budgetUsd: 1.5,
       spentUsd: 0,
       deadline: null,
-      nextAction: "Scan threads",
+      nextAction: "Escalate to Executor",
       blocker: null,
     },
     steps: [
-      { at: 0, action: orb("executing", "Scanning stale email threads") },
-      { at: 0.1, action: nodes("planner", "gmail") },
+      { at: 0, action: orb("thinking", "Sonnet is escalating triage to the Executor") },
+      { at: 0.1, action: nodes("assistant", "executor") },
       {
-        at: 0.4,
-        action: ev(id, "gmail", "tool.call", "gmail.threads — 3 threads stale > 5 days", {
-          edge: { from: "planner", to: "gmail" },
+        at: 0.3,
+        action: ev(id, "assistant", "delegate.execute", "Above menial scope — Executor takes triage + blast", {
+          edge: { from: "assistant", to: "executor" },
+          detail: "assistant handles single sends; bulk work goes to opus",
         }),
       },
-      { at: 3, action: goal(id, { status: "active", progress: 0.4, nextAction: "Draft replies" }) },
+      { at: 1.2, action: orb("executing", "Executor is triaging the inbox") },
+      { at: 1.3, action: nodes("executor", "gmail") },
       {
-        at: 5,
-        action: ev(id, "planner", "drafts.created", "3 follow-up drafts written in your voice", {
-          detail: "model: claude-sonnet-4-6 · tone: brief, warm",
+        at: 1.5,
+        action: ev(id, "executor", "tool.call", "gmail.triage — 23 unread sorted, 6 archived, 3 flagged", {
+          edge: { from: "executor", to: "gmail" },
+          detail: "claude-opus-4-8 · labels applied, nothing deleted",
+        }),
+      },
+      { at: 4, action: goal(id, { status: "active", progress: 0.45, nextAction: "Draft outreach blast" }) },
+      {
+        at: 6,
+        action: ev(id, "executor", "drafts.created", "Outreach blast drafted for 12 recipients, in your voice", {
+          detail: "personalized per recipient · tone: brief, warm",
         }),
       },
       {
-        at: 5.5,
+        at: 6.4,
         action: {
           kind: "artifact",
           artifact: {
             id: `${id}-art1`,
             goalId: id,
             kind: "draft",
-            name: "3 follow-up drafts",
-            meta: "advisor · landlord · study group",
+            name: "Outreach blast · 12 drafts",
+            meta: "triage done · 3 flagged for you",
           },
         },
       },
       {
-        at: 6.1,
+        at: 6.6,
         action: goal(id, { status: "waiting_approval", progress: 0.75, nextAction: "Awaiting send approval", blocker: "Needs your approval" }),
       },
-      { at: 6.3, action: orb("waiting", "Waiting on send approval") },
+      { at: 6.8, action: orb("waiting", "Sonnet is waiting on your send approval") },
       {
-        at: 6.5,
+        at: 7,
         action: {
           kind: "approval",
           gate: true,
           approval: {
             id: `${id}-appr1`,
             goalId: id,
-            actionSummary: "Send follow-up email to advisor",
+            actionSummary: "Send outreach blast to 12 recipients",
             risk: "communication_send",
             preview: [
-              "to: advisor@university.edu",
-              "subject: Re: thesis direction — quick follow-up",
-              "“Just circling back on the outline I sent Monday…”",
-              "2 more drafts queued behind this one",
+              "from: you · 12 personalized emails",
+              "subject: Quick intro — RESOLVE",
+              "“Wanted to put this on your radar…”",
+              "staggered send over 10 min",
             ],
-            recipient: "advisor@university.edu",
-            undoWindow: "30s unsend window",
+            recipient: "12 recipients",
+            undoWindow: "30s unsend window per email",
             status: "pending",
           },
           onApprove: [
-            ev(id, "gmail", "email.sent", "Follow-up sent to advisor — undo for 30s", {
+            ev(id, "executor", "blast.sent", "Blast rolling out — staggered, undo live per email", {
               level: "success",
-              edge: { from: "core", to: "gmail" },
+              edge: { from: "executor", to: "gmail" },
             }),
-            goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 0.12, blocker: null }),
-            orb("idle", "Standing by"),
+            goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 0.34, blocker: null }),
+            orb("idle", "Sonnet standing by"),
             nodes(),
           ],
           onReject: [
-            ev(id, "core", "email.held", "Send rejected — drafts stay in outbox", { level: "warn" }),
+            ev(id, "assistant", "blast.held", "Sonnet: send rejected — drafts parked in outbox", { level: "warn" }),
             goal(id, { status: "paused", progress: 0.8, nextAction: "Drafts held", blocker: "Send rejected" }),
-            orb("idle", "Standing by"),
+            orb("idle", "Sonnet standing by"),
             nodes(),
           ],
         },
@@ -477,7 +511,7 @@ function emailFollowups(id = "g-email"): Scenario {
   };
 }
 
-// ── ad-hoc command scenario ───────────────────────────────────────────────
+// ── ad-hoc command — Luna routes, Sonnet handles it herself ───────────────
 
 export function makeCommandScenario(text: string, id: string): Scenario {
   const short = text.length > 64 ? `${text.slice(0, 61)}…` : text;
@@ -492,38 +526,42 @@ export function makeCommandScenario(text: string, id: string): Scenario {
       budgetUsd: 2,
       spentUsd: 0,
       deadline: null,
-      nextAction: "Intake",
+      nextAction: "Route",
       blocker: null,
     },
     steps: [
-      { at: 0, action: orb("listening", "Heard you — parsing the request") },
-      { at: 0.8, action: orb("thinking", "Typing the goal and compiling policy") },
-      { at: 0.9, action: nodes("planner") },
+      { at: 0, action: orb("listening", "Sonnet heard you — parsing the request") },
+      { at: 0.7, action: nodes("assistant", "luna") },
       {
-        at: 1.4,
-        action: ev(id, "planner", "goal.typed", `Goal accepted: ${short}`, {
+        at: 0.9,
+        action: ev(id, "luna", "route.classified", "Routed: menial · assistant handles it directly", {
+          edge: { from: "assistant", to: "luna" },
+        }),
+      },
+      { at: 1.4, action: orb("thinking", "Sonnet is working your request") },
+      {
+        at: 1.6,
+        action: ev(id, "assistant", "goal.typed", `Goal accepted: ${short}`, {
           detail: "autonomy: assist · budget $2.00 · policy compiled",
         }),
       },
-      { at: 2.4, action: goal(id, { status: "active", progress: 0.3, nextAction: "Research" }) },
-      { at: 2.5, action: orb("executing", "Working the request") },
-      { at: 2.6, action: nodes("planner", "researcher", "web") },
+      { at: 2.4, action: goal(id, { status: "active", progress: 0.3, nextAction: "Gather" }) },
+      { at: 2.5, action: orb("executing", "Sonnet is on it") },
+      { at: 2.6, action: nodes("assistant", "web") },
       {
         at: 3.2,
-        action: ev(id, "researcher", "tool.call", "web.search — gathering evidence", {
-          edge: { from: "researcher", to: "web" },
+        action: ev(id, "assistant", "tool.call", "web.search — gathering what you asked for", {
+          edge: { from: "assistant", to: "web" },
         }),
       },
-      { at: 6.5, action: nodes("evaluator") },
       {
-        at: 7,
-        action: ev(id, "evaluator", "verify.passed", "Result passes success criteria", {
+        at: 6.5,
+        action: ev(id, "assistant", "check.passed", "Result checks out against your request", {
           level: "success",
-          edge: { from: "evaluator", to: "researcher" },
         }),
       },
       {
-        at: 7.6,
+        at: 7.2,
         action: {
           kind: "artifact",
           artifact: {
@@ -531,14 +569,14 @@ export function makeCommandScenario(text: string, id: string): Scenario {
             goalId: id,
             kind: "report",
             name: short,
-            meta: "ad-hoc request · evidence attached",
+            meta: "handled directly by Sonnet",
           },
         },
       },
-      { at: 7.8, action: goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 0.21 }) },
-      { at: 8, action: ev(id, "core", "goal.completed", "Done — result in the artifacts dock", { level: "success" }) },
-      { at: 8.4, action: orb("idle", "Standing by") },
-      { at: 8.5, action: nodes() },
+      { at: 7.4, action: goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 0.11 }) },
+      { at: 7.6, action: ev(id, "assistant", "goal.completed", "Done — result in the artifacts dock", { level: "success" }) },
+      { at: 8, action: orb("idle", "Sonnet standing by") },
+      { at: 8.1, action: nodes() },
     ],
   };
 }
@@ -553,6 +591,6 @@ export function buildPlaylist(): Array<{ scenario: Scenario; startAt: number }> 
     { scenario: briefing(`g-briefing${suffix}`), startAt: 2 },
     { scenario: studyGuide(`g-econ${suffix}`), startAt: 14 },
     { scenario: bugfix(`g-bugfix${suffix}`), startAt: 40 },
-    { scenario: emailFollowups(`g-email${suffix}`), startAt: 66 },
+    { scenario: emailBlast(`g-email${suffix}`), startAt: 64 },
   ];
 }

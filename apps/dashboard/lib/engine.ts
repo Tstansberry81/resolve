@@ -42,10 +42,11 @@ const INITIAL_VITALS: Vitals = {
     { id: "web", label: "Web Search", status: "healthy", latencyMs: 300 },
   ],
   models: [
-    { role: "router", model: "gpt-5.6-luna", p50Ms: 320, costTodayUsd: 0.04 },
     { role: "assistant", model: "claude-sonnet-4-6", p50Ms: 1400, costTodayUsd: 0.31 },
+    { role: "router", model: "gpt-5.6-luna", p50Ms: 320, costTodayUsd: 0.04 },
     { role: "planner", model: "gpt-5.6-sol", p50Ms: 3800, costTodayUsd: 0.22 },
-    { role: "coder", model: "gpt-5.3-codex", p50Ms: 5200, costTodayUsd: 0.47 },
+    { role: "executor", model: "claude-opus-4-8", p50Ms: 4600, costTodayUsd: 0.29 },
+    { role: "coder", model: "claude-opus-4-8", p50Ms: 5200, costTodayUsd: 0.47 },
     { role: "reviewer", model: "claude-opus-4-8", p50Ms: 4100, costTodayUsd: 0.18 },
   ],
   queueDepth: 0,
@@ -58,7 +59,7 @@ const INITIAL_VITALS: Vitals = {
 class MockEngine {
   private state: EngineState = {
     orb: "idle",
-    orbCaption: "Standing by",
+    orbCaption: "Sonnet standing by",
     goals: [],
     events: [],
     approvals: [],
@@ -334,7 +335,7 @@ class MockEngine {
   resume = () => {
     this.commit({
       emergencyStopped: false,
-      orbCaption: "Standing by",
+      orbCaption: "Sonnet standing by",
       vitals: { ...this.state.vitals, workerStatus: "idle" },
     });
     this.pushEvent({

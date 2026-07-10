@@ -16,7 +16,7 @@ export function ArtifactsDock() {
   const { artifacts } = useEngine();
 
   return (
-    <div className="panel area-artifacts artifacts">
+    <div className="panel artifacts artifacts-corner">
       <div className="panel-title">
         <span className="dot" />
         Artifacts
