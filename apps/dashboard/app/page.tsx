@@ -5,6 +5,9 @@ import { CommandCore } from "@/components/CommandCore";
 import { MissionRail } from "@/components/MissionRail";
 import { Constellation } from "@/components/Constellation";
 import { Timeline } from "@/components/Timeline";
+import { ApprovalInbox } from "@/components/ApprovalInbox";
+import { Vitals } from "@/components/Vitals";
+import { ArtifactsDock } from "@/components/ArtifactsDock";
 
 function Clock() {
   return (
@@ -44,22 +47,11 @@ export default function CommandCenter() {
         <MissionRail />
         <CommandCore />
         <Constellation />
-        <div className="panel area-approvals">
-          <div className="panel-title"><span className="dot" />Approvals</div>
-          <p className="placeholder">
-            {state.approvals.filter((a) => a.status === "pending").length} pending
-          </p>
-        </div>
+        <ApprovalInbox />
         <Timeline />
         <div className="vitals-stack">
-          <div className="panel area-vitals">
-            <div className="panel-title"><span className="dot" />System vitals</div>
-            <p className="placeholder">worker: {state.vitals.workerStatus}</p>
-          </div>
-          <div className="panel area-artifacts">
-            <div className="panel-title"><span className="dot" />Artifacts</div>
-            <p className="placeholder">{state.artifacts.length} produced</p>
-          </div>
+          <Vitals />
+          <ArtifactsDock />
         </div>
       </section>
     </main>
