@@ -110,9 +110,16 @@ class MockEngine {
     for (const { scenario, startAt } of buildPlaylist()) {
       this.schedule(startAt * 1000, () => this.runScenario(scenario));
     }
-    // restart the whole show after a quiet stretch
+    // restart the whole show after a quiet stretch, clearing finished goals
+    // so the rail doesn't fill with duplicates across loops
     this.schedule(150_000, () => {
-      if (!this.state.emergencyStopped) this.runPlaylist();
+      if (this.state.emergencyStopped) return;
+      this.commit({
+        goals: this.state.goals.filter(
+          (g) => g.status !== "completed" && g.status !== "failed",
+        ),
+      });
+      this.runPlaylist();
     });
   }
 

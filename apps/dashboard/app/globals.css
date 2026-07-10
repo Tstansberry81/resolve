@@ -152,6 +152,17 @@ body::before {
   padding: 0 22px 22px;
 }
 
+/* Desktop: lock the shell to the viewport so the grid's fr rows resolve
+   against a definite height (content scrolls inside panels). With an
+   indefinite grid height, fr rows collapse to content size and the canvas's
+   intrinsic size feeds back into its own row — a runaway growth loop. */
+@media (min-width: 1281px) {
+  .shell {
+    height: 100vh;
+    overflow: hidden;
+  }
+}
+
 .shell-header {
   display: flex;
   align-items: center;

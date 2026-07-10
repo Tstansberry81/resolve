@@ -343,6 +343,11 @@ function bugfix(id = "g-bugfix"): Scenario {
         },
       },
       {
+        at: 18,
+        action: goal(id, { status: "waiting_approval", progress: 0.9, nextAction: "Awaiting merge decision", blocker: "Needs your approval" }),
+      },
+      { at: 18.2, action: orb("waiting", "Waiting on merge approval") },
+      {
         at: 18.4,
         action: {
           kind: "approval",
@@ -364,23 +369,18 @@ function bugfix(id = "g-bugfix"): Scenario {
           },
           onApprove: [
             ev(id, "github", "pr.merged", "PR #7 merged to main", { level: "success" }),
-            goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 2.6 }),
+            goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 2.6, blocker: null }),
             orb("idle", "Standing by"),
             nodes(),
           ],
           onReject: [
             ev(id, "core", "pr.held", "Merge rejected — PR stays in draft", { level: "warn" }),
-            goal(id, { status: "completed", progress: 0.95, nextAction: "PR awaiting manual merge", spentUsd: 2.6 }),
+            goal(id, { status: "completed", progress: 0.95, nextAction: "PR awaiting manual merge", spentUsd: 2.6, blocker: null }),
             orb("idle", "Standing by"),
             nodes(),
           ],
         },
       },
-      {
-        at: 18.6,
-        action: goal(id, { status: "waiting_approval", progress: 0.9, nextAction: "Awaiting merge decision", blocker: "Needs your approval" }),
-      },
-      { at: 18.8, action: orb("waiting", "Waiting on merge approval") },
     ],
   };
 }
@@ -432,6 +432,11 @@ function emailFollowups(id = "g-email"): Scenario {
         },
       },
       {
+        at: 6.1,
+        action: goal(id, { status: "waiting_approval", progress: 0.75, nextAction: "Awaiting send approval", blocker: "Needs your approval" }),
+      },
+      { at: 6.3, action: orb("waiting", "Waiting on send approval") },
+      {
         at: 6.5,
         action: {
           kind: "approval",
@@ -456,7 +461,7 @@ function emailFollowups(id = "g-email"): Scenario {
               level: "success",
               edge: { from: "core", to: "gmail" },
             }),
-            goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 0.12 }),
+            goal(id, { status: "completed", progress: 1, nextAction: "—", spentUsd: 0.12, blocker: null }),
             orb("idle", "Standing by"),
             nodes(),
           ],
@@ -468,11 +473,6 @@ function emailFollowups(id = "g-email"): Scenario {
           ],
         },
       },
-      {
-        at: 6.7,
-        action: goal(id, { status: "waiting_approval", progress: 0.75, nextAction: "Awaiting send approval", blocker: "Needs your approval" }),
-      },
-      { at: 6.9, action: orb("waiting", "Waiting on send approval") },
     ],
   };
 }
