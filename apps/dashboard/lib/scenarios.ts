@@ -343,6 +343,11 @@ function bugfix(id = "g-bugfix"): Scenario {
         },
       },
       {
+        at: 18,
+        action: goal(id, { status: "waiting_approval", progress: 0.9, nextAction: "Awaiting merge decision", blocker: "Needs your approval" }),
+      },
+      { at: 18.2, action: orb("waiting", "Waiting on merge approval") },
+      {
         at: 18.4,
         action: {
           kind: "approval",
@@ -376,11 +381,6 @@ function bugfix(id = "g-bugfix"): Scenario {
           ],
         },
       },
-      {
-        at: 18.6,
-        action: goal(id, { status: "waiting_approval", progress: 0.9, nextAction: "Awaiting merge decision", blocker: "Needs your approval" }),
-      },
-      { at: 18.8, action: orb("waiting", "Waiting on merge approval") },
     ],
   };
 }
@@ -432,6 +432,11 @@ function emailFollowups(id = "g-email"): Scenario {
         },
       },
       {
+        at: 6.1,
+        action: goal(id, { status: "waiting_approval", progress: 0.75, nextAction: "Awaiting send approval", blocker: "Needs your approval" }),
+      },
+      { at: 6.3, action: orb("waiting", "Waiting on send approval") },
+      {
         at: 6.5,
         action: {
           kind: "approval",
@@ -468,11 +473,6 @@ function emailFollowups(id = "g-email"): Scenario {
           ],
         },
       },
-      {
-        at: 6.7,
-        action: goal(id, { status: "waiting_approval", progress: 0.75, nextAction: "Awaiting send approval", blocker: "Needs your approval" }),
-      },
-      { at: 6.9, action: orb("waiting", "Waiting on send approval") },
     ],
   };
 }
