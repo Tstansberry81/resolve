@@ -158,6 +158,13 @@ function briefing(id = "g-briefing"): Scenario {
           level: "success",
         }),
       },
+      {
+        at: 12.15,
+        action: ev(id, "assistant", "vault.commit", "Daily summary committed to vault via GitHub", {
+          detail: "wiki/log.md · second brain stays current",
+          edge: { from: "assistant", to: "vault" },
+        }),
+      },
       { at: 12.2, action: orb("idle", "Sonnet standing by") },
       { at: 12.3, action: nodes() },
     ],
@@ -188,6 +195,13 @@ function studyGuide(id = "g-econ"): Scenario {
         at: 0.5,
         action: ev(id, "assistant", "delegate.plan", "Large project — handed to Sol for planning", {
           edge: { from: "assistant", to: "sol" },
+        }),
+      },
+      {
+        at: 1.2,
+        action: ev(id, "sol", "vault.read", "Sol pulled course + goal context from your vault", {
+          detail: "second brain: wiki/index, ECON pages, prior study patterns",
+          edge: { from: "sol", to: "vault" },
         }),
       },
       {
@@ -269,6 +283,13 @@ function studyGuide(id = "g-econ"): Scenario {
         action: ev(id, "assistant", "goal.completed", "Sonnet: study guide saved to Notion — $1.92 of $3.00", {
           level: "success",
           edge: { from: "assistant", to: "notion" },
+        }),
+      },
+      {
+        at: 20.9,
+        action: ev(id, "assistant", "vault.commit", "Summary + citations committed to vault via GitHub", {
+          detail: "wiki/log.md entry + analyses page · pulls down to Obsidian",
+          edge: { from: "assistant", to: "vault" },
         }),
       },
       { at: 21, action: orb("idle", "Sonnet standing by") },
