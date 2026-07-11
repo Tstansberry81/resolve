@@ -9,11 +9,16 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import __version__, bus, store
+from . import __version__, bus, executor, store
 from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
 from .config import load_json, model_choice
 
 app = FastAPI(title="RESOLVE Control Plane", version=__version__)
+
+
+@app.on_event("startup")
+async def _start_worker() -> None:
+    asyncio.get_running_loop().create_task(executor.worker_loop())
 
 CP_TOKEN = os.getenv("CP_TOKEN", "")
 
@@ -170,3 +175,15 @@ async def approval_decide(approval_id: str, body: DecisionBody) -> dict:
     if body.decision not in ("approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision must be approved|rejected")
     return await decide_approval(approval_id, body.decision)
+
+
+@app.post("/v1/stop", dependencies=[Depends(auth)])
+async def emergency_stop() -> dict:
+    await executor.set_halted(True)
+    return {"ok": True, "halted": True}
+
+
+@app.post("/v1/resume", dependencies=[Depends(auth)])
+async def resume() -> dict:
+    await executor.set_halted(False)
+    return {"ok": True, "halted": False}

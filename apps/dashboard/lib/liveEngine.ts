@@ -160,18 +160,18 @@ export class LiveEngine {
   };
 
   emergencyStop = () => {
-    // backend halt lands with the worker phase; for now stop the feed locally
-    this.es?.close();
+    // real backend halt: the executor drops queued steps until resume
+    void fetch("/api/cp/v1/stop", { method: "POST" });
     this.commit({
       emergencyStopped: true,
       orb: "idle",
-      orbCaption: "Feed paused locally — backend stop arrives with the worker phase",
+      orbCaption: "EMERGENCY STOP — executor halted",
     });
   };
 
   resume = () => {
+    void fetch("/api/cp/v1/resume", { method: "POST" });
     this.commit({ emergencyStopped: false, orbCaption: "Sonnet standing by" });
-    this.connect();
     void this.loadSnapshot();
   };
 }
