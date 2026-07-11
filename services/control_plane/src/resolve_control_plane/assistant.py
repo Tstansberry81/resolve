@@ -12,7 +12,9 @@ import logging
 import os
 import time
 import uuid
+from datetime import datetime
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 import anthropic
 import anyio
@@ -285,6 +287,12 @@ async def _loop(goal_id: str, text: str) -> None:
     )
     await bus.set_orb("thinking", "Sonnet is working your request", ["assistant"])
 
+    now = datetime.now(ZoneInfo("America/New_York"))
+    system = SYSTEM + (
+        f"\n\nRight now it is {now.strftime('%A, %B %d, %Y at %I:%M %p')} Eastern."
+        " Resolve every relative date (tomorrow, Sunday, next week) from this —"
+        " never guess weekdays."
+    )
     messages: list[dict[str, Any]] = [{"role": "user", "content": text}]
     final_text = ""
     try:
@@ -292,7 +300,7 @@ async def _loop(goal_id: str, text: str) -> None:
             resp = await client.messages.create(
                 model=ASSISTANT_MODEL,
                 max_tokens=1500,
-                system=SYSTEM,
+                system=system,
                 tools=TOOLS,
                 messages=messages,
             )
@@ -395,4 +403,10 @@ async def _loop(goal_id: str, text: str) -> None:
         log.exception("assistant loop failed")
         await bus.emit("core", "goal.failed", f"Assistant loop error: {exc}", level="error",
                        goal_id=goal_id)
+        try:
+            await anyio.to_thread.run_sync(
+                lambda: store.update("goals", {"id": f"eq.{goal_id}"}, {"status": "failed"})
+            )
+        except Exception:
+            pass
         await bus.set_orb("idle", "Sonnet standing by", [])
