@@ -2,6 +2,7 @@
 
 import { useEngine, engine } from "@/lib/useEngine";
 import { Starfield } from "@/components/Starfield";
+import { ChatStrip } from "@/components/ChatStrip";
 import { CommandCore } from "@/components/CommandCore";
 import { Constellation } from "@/components/Constellation";
 import { Sidebar } from "@/components/Sidebar";
@@ -56,6 +57,7 @@ export default function CommandCenter() {
           <Sidebar />
           <section className="v2-center">
             <CommandCore />
+            <ChatStrip />
             <Constellation />
           </section>
         </div>

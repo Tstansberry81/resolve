@@ -1,0 +1,63 @@
+.strip {
+  width: min(680px, 100%);
+  margin: 4px auto 0;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 6px;
+  scrollbar-width: thin;
+}
+
+.strip::-webkit-scrollbar {
+  width: 4px;
+}
+
+.strip::-webkit-scrollbar-thumb {
+  background: var(--edge);
+  border-radius: 2px;
+}
+
+.rowYou {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rowSonnet {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.bubbleYou,
+.bubbleSonnet {
+  max-width: 78%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bubbleYou {
+  background: var(--blue-dim, rgba(90, 140, 255, 0.14));
+  border: 1px solid rgba(90, 140, 255, 0.35);
+  color: var(--text-1);
+  border-bottom-right-radius: 4px;
+}
+
+.bubbleSonnet {
+  background: linear-gradient(180deg, var(--glass-strong), var(--glass));
+  border: 1px solid var(--edge);
+  color: var(--text-1);
+  border-bottom-left-radius: 4px;
+}
+
+.tag {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--text-3, var(--text-2));
+  margin-bottom: 3px;
+}
