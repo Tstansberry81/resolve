@@ -291,7 +291,8 @@ async def _loop(goal_id: str, text: str) -> None:
     system = SYSTEM + (
         f"\n\nRight now it is {now.strftime('%A, %B %d, %Y at %I:%M %p')} Eastern."
         " Resolve every relative date (tomorrow, Sunday, next week) from this —"
-        " never guess weekdays."
+        " never guess weekdays. 'Tomorrow' always means the next calendar date,"
+        " even between midnight and dawn."
     )
     messages: list[dict[str, Any]] = [{"role": "user", "content": text}]
     final_text = ""
