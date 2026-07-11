@@ -21,8 +21,8 @@
     },
     "extract_and_summarize": {
       "primary": {
-        "provider": "google",
-        "model": "gemini-3.1-flash-lite",
+        "provider": "anthropic",
+        "model": "claude-haiku-4-5",
         "reasoning": "low"
       },
       "fallback": {
@@ -57,13 +57,13 @@
     },
     "research": {
       "primary": {
-        "provider": "google",
-        "model": "gemini-3.5-flash",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
         "reasoning": "medium"
       },
       "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.6-terra",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
         "reasoning": "medium"
       }
     },
@@ -117,8 +117,8 @@
     },
     "vision_and_documents": {
       "primary": {
-        "provider": "google",
-        "model": "gemini-3.5-flash",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
         "reasoning": "medium"
       },
       "fallback": {
