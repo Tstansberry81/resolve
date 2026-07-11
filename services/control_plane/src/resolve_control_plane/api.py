@@ -1,12 +1,36 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import asyncio
+import json
+import os
 
-from . import __version__
+import anyio
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from . import __version__, bus, store
+from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
 from .config import load_json, model_choice
 
-
 app = FastAPI(title="RESOLVE Control Plane", version=__version__)
+
+CP_TOKEN = os.getenv("CP_TOKEN", "")
+
+
+def auth(request: Request) -> None:
+    """Bearer-token gate for /v1/*. Open when CP_TOKEN is unset (local dev)."""
+    if not CP_TOKEN:
+        return
+    header = request.headers.get("authorization", "")
+    if header != f"Bearer {CP_TOKEN}":
+        raise HTTPException(status_code=401, detail="bad token")
+
+
+@app.get("/")
+def root() -> dict:
+    return {"service": "resolve-control-plane", "version": __version__,
+            "see": ["/healthz", "/docs", "/v1/snapshot"]}
 
 
 @app.get("/healthz")
@@ -25,14 +49,124 @@ def model_route(role: str) -> dict[str, str]:
         choice = model_choice(role)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {
-        "role": role,
-        "provider": choice.provider,
-        "model": choice.model,
-        "reasoning": choice.reasoning,
-    }
+    return {"role": role, "provider": choice.provider, "model": choice.model,
+            "reasoning": choice.reasoning}
 
 
 @app.get("/v1/connectors")
 def connectors() -> dict:
     return load_json("connectors.json")
+
+
+# ── live surface ──────────────────────────────────────────────────────────
+
+
+def _connector_health() -> list[dict]:
+    labels = {"vault": "Vault (GitHub)", "gmail": "Gmail", "calendar": "Calendar",
+              "notion": "Notion"}
+    out = []
+    for cid, check in CONNECTOR_AVAILABLE.items():
+        out.append({"id": cid, "label": labels.get(cid, cid),
+                    "status": "healthy" if check() else "down", "latencyMs": 0})
+    return out
+
+
+@app.get("/v1/snapshot", dependencies=[Depends(auth)])
+async def snapshot() -> dict:
+    def _load():
+        goals = store.select("goals", {"order": "created_at.desc", "limit": "12"})
+        approvals = store.select("approvals", {"order": "created_at.desc", "limit": "8"})
+        return goals, approvals
+
+    goals_raw, approvals_raw = await anyio.to_thread.run_sync(_load)
+
+    goals = [
+        {
+            "id": str(g.get("id")),
+            "objective": g.get("objective", ""),
+            "category": g.get("category", "personal"),
+            "status": g.get("status", "active"),
+            "autonomyMode": g.get("autonomy_mode", "execute"),
+            "progress": 1.0 if g.get("status") == "completed" else 0.5,
+            "budgetUsd": float(g.get("max_cost_usd") or 2),
+            "spentUsd": 0.0,
+            "deadline": None,
+            "nextAction": "—" if g.get("status") == "completed" else "In flight",
+            "blocker": "Needs your approval" if g.get("status") == "waiting_approval" else None,
+        }
+        for g in goals_raw
+    ]
+    approvals = [
+        {
+            "id": str(a.get("id")),
+            "goalId": str(a.get("goal_id") or ""),
+            "actionSummary": a.get("action_summary", ""),
+            "risk": a.get("risk_class", "communication_send"),
+            "preview": a.get("preview_json") or [],
+            "recipient": None,
+            "undoWindow": None,
+            "status": a.get("status", "pending"),
+        }
+        for a in approvals_raw
+    ]
+    return {
+        "mode": "live",
+        "orb": bus.orb["state"],
+        "orbCaption": bus.orb["caption"],
+        "activeNodes": list(bus.active_nodes),
+        "goals": goals,
+        "events": bus.recent_events(),
+        "approvals": approvals,
+        "artifacts": [],
+        "connectors": _connector_health(),
+        "pendingApprovals": len(pending_actions),
+    }
+
+
+@app.get("/v1/events", dependencies=[Depends(auth)])
+async def events() -> StreamingResponse:
+    q = bus.subscribe()
+
+    async def stream():
+        try:
+            yield f"data: {json.dumps({'kind': 'hello'})}\n\n"
+            while True:
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=25)
+                    yield f"data: {json.dumps(msg, default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            bus.unsubscribe(q)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+class CommandBody(BaseModel):
+    text: str
+
+
+@app.post("/v1/command", dependencies=[Depends(auth)])
+async def command(body: CommandBody) -> dict:
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty command")
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+    goal_id = await run_command(text)
+    return {"ok": True, "goalId": goal_id}
+
+
+class DecisionBody(BaseModel):
+    decision: str  # approved | rejected
+
+
+@app.post("/v1/approvals/{approval_id}/decide", dependencies=[Depends(auth)])
+async def approval_decide(approval_id: str, body: DecisionBody) -> dict:
+    if body.decision not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="decision must be approved|rejected")
+    return await decide_approval(approval_id, body.decision)
