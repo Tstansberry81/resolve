@@ -39,6 +39,7 @@ TOOL_POLICY = {
     "get_unread_email": ("email.read", "gmail"),
     "send_email": ("email.send", "gmail"),
     "vault_log": ("vault.append", "vault"),
+    "vault_read": ("vault.read", "vault"),
     "plan_project": ("plan.project", "sol"),
 }
 
@@ -120,6 +121,18 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "vault_read",
+        "description": "Read from the user's Obsidian vault (second brain). Give a path to read a file, or a query to search file names. Use this to pull context about the user's life and projects.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Exact file path, e.g. wiki/log.md"},
+                "query": {"type": "string", "description": "Substring to search file names for"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "plan_project",
         "description": "Hand a complex multi-step goal to Sol (planner) and the Opus executor. Call ONCE with a clear objective; steps run in the background and stream into the event feed.",
         "input_schema": {
@@ -167,6 +180,10 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         return gmail_imap.send_email(args["to"], args["subject"], args["body"])
     if name == "vault_log":
         return vault_github.append_log(args["title"], list(args.get("lines", [])))
+    if name == "vault_read":
+        if args.get("path"):
+            return vault_github.read_file(str(args["path"]))
+        return vault_github.search_files(str(args.get("query", "")))
     raise ValueError(f"unknown tool {name}")
 
 
@@ -371,9 +388,13 @@ async def _loop(goal_id: str, text: str) -> None:
                              "is_error": True}
                         )
                         continue
-                    plan_result = await executor.plan_project(
-                        goal_id, str(tu.input.get("objective", text))
-                    )
+                    try:
+                        plan_result = await executor.plan_project(
+                            goal_id, str(tu.input.get("objective", text))
+                        )
+                    except Exception as exc:
+                        plan_result = {"error": f"Planner failed: {exc}. Do the steps"
+                                       " yourself with your own tools instead."}
                     results.append(
                         {"type": "tool_result", "tool_use_id": tu.id,
                          "content": json.dumps(plan_result, default=str)[:2000]}

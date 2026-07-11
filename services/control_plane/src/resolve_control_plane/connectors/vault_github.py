@@ -49,3 +49,23 @@ def append_log(title: str, lines: list[str]) -> dict:
     )
     put.raise_for_status()
     return {"committed": True, "path": LOG_PATH, "title": title}
+
+
+def read_file(path: str) -> dict:
+    """Read one vault file (truncated) so agents can pull second-brain context."""
+    url = f"https://api.github.com/repos/{VAULT_REPO}/contents/{path}"
+    r = requests.get(url, headers=_headers(), timeout=20)
+    r.raise_for_status()
+    text = base64.b64decode(r.json().get("content", "")).decode("utf-8", "replace")
+    return {"path": path, "content": text[:6000]}
+
+
+def search_files(query: str) -> dict:
+    """List vault file paths whose name contains the query (case-insensitive)."""
+    url = f"https://api.github.com/repos/{VAULT_REPO}/git/trees/main?recursive=1"
+    r = requests.get(url, headers=_headers(), timeout=20)
+    r.raise_for_status()
+    q = query.lower()
+    paths = [t["path"] for t in r.json().get("tree", [])
+             if t.get("type") == "blob" and q in t["path"].lower()]
+    return {"matches": paths[:30]}
