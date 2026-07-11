@@ -101,6 +101,9 @@
     },
     "vault.append": {
       "risk": "reversible_write"
+    },
+    "plan.project": {
+      "risk": "reversible_write"
     }
   }
 }

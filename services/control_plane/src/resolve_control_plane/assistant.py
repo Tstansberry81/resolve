@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 import anyio
 
-from . import bus, store
+from . import bus, executor, store
 from .connectors import gcal, gmail_imap, notion_api, vault_github
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
@@ -39,6 +39,7 @@ TOOL_POLICY = {
     "get_unread_email": ("email.read", "gmail"),
     "send_email": ("email.send", "gmail"),
     "vault_log": ("vault.append", "vault"),
+    "plan_project": ("plan.project", "sol"),
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -118,6 +119,16 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "plan_project",
+        "description": "Hand a complex multi-step goal to Sol (planner) and the Opus executor. Call ONCE with a clear objective; steps run in the background and stream into the event feed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"objective": {"type": "string", "description": "Full objective with all needed details"}},
+            "required": ["objective"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 SYSTEM = """You are Sonnet, the RESOLVE assistant — the front door for Trav's personal
@@ -129,8 +140,9 @@ Rules:
 - Use ISO 8601 datetimes with the America/New_York offset for calendar writes.
 - send_email only queues for the user's approval; tell him it's waiting on his approval banner.
 - Be brief and warm. One short paragraph max in your final reply.
-- If a request is beyond these tools (bulk email work, coding, big projects), say that the
-  Executor/Sol lanes aren't wired yet and suggest the closest thing you CAN do."""
+- For complex multi-step requests (several distinct actions, research projects, bulk work),
+  call plan_project ONCE with the full objective. Sol plans it, the Opus executor runs the
+  steps in the background. Tell the user the plan is queued and list the steps."""
 
 
 def _connector_call(name: str, args: dict[str, Any]) -> Any:
@@ -349,6 +361,22 @@ async def _loop(goal_id: str, text: str) -> None:
                         {"type": "tool_result", "tool_use_id": tu.id,
                          "content": "Queued for the user's approval banner. Do not retry; "
                                     "tell the user it is waiting on their approval."}
+                    )
+                    continue
+                if tu.name == "plan_project":
+                    if not executor.available():
+                        results.append(
+                            {"type": "tool_result", "tool_use_id": tu.id,
+                             "content": "Planner unavailable: OPENAI_API_KEY not configured.",
+                             "is_error": True}
+                        )
+                        continue
+                    plan_result = await executor.plan_project(
+                        goal_id, str(tu.input.get("objective", text))
+                    )
+                    results.append(
+                        {"type": "tool_result", "tool_use_id": tu.id,
+                         "content": json.dumps(plan_result, default=str)[:2000]}
                     )
                     continue
                 if not CONNECTOR_AVAILABLE[node]():
