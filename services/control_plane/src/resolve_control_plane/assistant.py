@@ -12,6 +12,7 @@ import logging
 import os
 import time
 import uuid
+from collections import deque
 from datetime import datetime
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -167,6 +168,10 @@ CONNECTOR_AVAILABLE = {
 # pending approval id → the action to run on approve
 pending_actions: dict[str, dict[str, Any]] = {}
 
+# recent (user_text, assistant_reply) exchanges — gives follow-up commands
+# conversational context; process-local, resets on deploy
+history: deque[tuple[str, str]] = deque(maxlen=8)
+
 
 async def _queue_approval(goal_id: str, tool: str, args: dict[str, Any], risk: str) -> str:
     preview: list[str] = [f"{k}: {str(v)[:90]}" for k, v in args.items()]
@@ -294,7 +299,11 @@ async def _loop(goal_id: str, text: str) -> None:
         " never guess weekdays. 'Tomorrow' always means the next calendar date,"
         " even between midnight and dawn."
     )
-    messages: list[dict[str, Any]] = [{"role": "user", "content": text}]
+    messages: list[dict[str, Any]] = []
+    for prior_user, prior_reply in history:
+        messages.append({"role": "user", "content": prior_user})
+        messages.append({"role": "assistant", "content": prior_reply})
+    messages.append({"role": "user", "content": text})
     final_text = ""
     try:
         for _ in range(MAX_TURNS):
@@ -382,6 +391,7 @@ async def _loop(goal_id: str, text: str) -> None:
             messages.append({"role": "user", "content": results})
 
         status = "waiting_approval" if pending_actions else "completed"
+        history.append((text, final_text or "Done."))
         await bus.emit(
             "assistant", "assistant.reply", final_text[:160] or "Done.",
             detail=final_text or None, level="success", goal_id=goal_id,
