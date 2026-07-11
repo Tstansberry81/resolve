@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import __version__, bus, executor, store
+from . import __version__, bus, executor, routines, store
 from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
 from .config import load_json, model_choice
 
@@ -19,6 +19,7 @@ app = FastAPI(title="RESOLVE Control Plane", version=__version__)
 @app.on_event("startup")
 async def _start_worker() -> None:
     asyncio.get_running_loop().create_task(executor.worker_loop())
+    asyncio.get_running_loop().create_task(routines.scheduler_loop())
 
 CP_TOKEN = os.getenv("CP_TOKEN", "")
 
@@ -187,3 +188,11 @@ async def emergency_stop() -> dict:
 async def resume() -> dict:
     await executor.set_halted(False)
     return {"ok": True, "halted": False}
+
+
+@app.post("/v1/routines/morning_brief", dependencies=[Depends(auth)])
+async def morning_brief() -> dict:
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+    goal_id = await routines.run_morning_brief()
+    return {"ok": True, "goalId": goal_id}

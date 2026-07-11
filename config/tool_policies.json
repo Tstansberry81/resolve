@@ -104,6 +104,9 @@
     },
     "plan.project": {
       "risk": "reversible_write"
+    },
+    "vault.read": {
+      "risk": "read"
     }
   }
 }
