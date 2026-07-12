@@ -107,6 +107,9 @@
     },
     "vault.read": {
       "risk": "read"
+    },
+    "local.ask": {
+      "risk": "read"
     }
   }
 }

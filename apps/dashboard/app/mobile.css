@@ -1,0 +1,57 @@
+/* Chat-first mobile layout: command core + conversation up top, everything
+   else stacks below and scrolls. Desktop is untouched. */
+
+@media (max-width: 700px) {
+  .v2-app {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .v2-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .header-right .clock {
+    display: none;
+  }
+
+  .v2-main {
+    flex-direction: column;
+  }
+
+  .v2-center {
+    order: 0;
+    padding: 0 12px;
+  }
+
+  .sidebar {
+    order: 1;
+    width: 100%;
+    padding: 0 12px 24px;
+  }
+
+  .orb-stage {
+    transform: scale(0.72);
+    margin: -28px 0;
+  }
+
+  .constellation {
+    display: none; /* the show-piece stays a big-screen thing */
+  }
+
+  .artifacts-corner {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin: 0 12px 24px;
+  }
+
+  .banner-stack {
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
+}

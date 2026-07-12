@@ -63,3 +63,9 @@ def create_event(title: str, start_iso: str, end_iso: str, description: str = ""
     }
     ev = svc.events().insert(calendarId=os.environ["GOOGLE_CALENDAR_ID"], body=body).execute()
     return {"id": ev.get("id"), "title": title, "link": ev.get("htmlLink")}
+
+
+def delete_event(event_id: str) -> dict:
+    svc = _service()
+    svc.events().delete(calendarId=os.environ["GOOGLE_CALENDAR_ID"], eventId=event_id).execute()
+    return {"deleted": True, "id": event_id}
