@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150" width="512" height="512">
+  <title>Resolve app icon (dark)</title>
+  <rect width="150" height="150" rx="34" fill="#0B2239"/>
+  <path d="M 22 58 C 48 66, 78 88, 100 106" fill="none" stroke="#7DD3FC" stroke-opacity="0.4" stroke-width="4" stroke-linecap="round"/>
+  <path d="M 26 90 C 52 94, 80 101, 98 111" fill="none" stroke="#7DD3FC" stroke-opacity="0.25" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M 28 116 C 34 100, 40 70, 44 42 C 45 34, 50 30, 60 30 C 82 30, 98 40, 96 56 C 94 72, 72 78, 58 74 C 70 80, 88 96, 103 110" fill="none" stroke="#7DD3FC" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="114" cy="118" r="9" fill="#4EE1A0"/>
+</svg>

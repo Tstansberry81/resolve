@@ -30,7 +30,8 @@ export default function CommandCenter() {
         <header className="v2-header">
           <VitalsDropdown />
           <div className="brand">
-            <span className="brand-sigil" aria-hidden />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icon.svg" alt="" width={22} height={22} style={{ borderRadius: 6 }} />
             <span className="brand-name">RESOLVE</span>
             {state.mode === "live" ? (
             <span className="badge badge-live">LIVE</span>

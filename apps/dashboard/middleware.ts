@@ -16,6 +16,6 @@ export async function middleware(req: NextRequest) {
 export const config = {
   // everything is gated except the gate itself and framework assets
   matcher: [
-    "/((?!gate|api/gate|_next/static|_next/image|favicon.ico|manifest.webmanifest|icon-192.png|icon-512.png).*)",
+    "/((?!gate|api/gate|_next/static|_next/image|favicon.ico|manifest.webmanifest|icon-192.png|icon.svg|apple-icon.png).*)",
   ],
 };
