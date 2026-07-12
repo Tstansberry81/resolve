@@ -22,6 +22,16 @@ MAX_RECENT = 80
 orb: dict[str, str] = {"state": "idle", "caption": "Sonnet standing by"}
 active_nodes: list[str] = []
 
+# event types worth pinging Telegram about, with a display prefix
+NOTIFY_TYPES = {
+    "assistant.reply": "💬 RESOLVE",
+    "approval.requested": "🔔 Approval needed",
+    "goal.failed": "⚠️ Goal failed",
+    "task.completed": "✅ Executor",
+    "task.failed": "⚠️ Executor",
+    "system.emergency_stop": "🛑 RESOLVE",
+}
+
 
 def subscribe() -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue(maxsize=200)
@@ -77,6 +87,17 @@ async def emit(
         await anyio.to_thread.run_sync(lambda: store.insert("agent_events", row))
     except Exception:
         pass  # never let persistence kill the feed
+    prefix = NOTIFY_TYPES.get(type_)
+    if prefix:
+        try:
+            from .connectors import telegram_notify
+
+            if telegram_notify.configured():
+                await anyio.to_thread.run_sync(
+                    lambda: telegram_notify.send(f"{prefix}\n{detail or summary}")
+                )
+        except Exception:
+            pass  # notifications must never break the bus
 
 
 async def set_orb(state: str, caption: str, nodes: list[str] | None = None) -> None:
