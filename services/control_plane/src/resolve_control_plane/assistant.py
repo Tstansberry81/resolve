@@ -21,7 +21,7 @@ import anthropic
 import anyio
 
 from . import bus, executor, store
-from .connectors import gcal, gmail_imap, notion_api, vault_github
+from .connectors import gcal, gmail_imap, local_llm, notion_api, vault_github
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
 
@@ -41,6 +41,9 @@ TOOL_POLICY = {
     "vault_log": ("vault.append", "vault"),
     "vault_read": ("vault.read", "vault"),
     "plan_project": ("plan.project", "sol"),
+    "delete_task": ("notion.page.archive", "notion"),
+    "delete_calendar_event": ("calendar.delete", "calendar"),
+    "ask_local": ("local.ask", "web"),
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -133,6 +136,36 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "delete_task",
+        "description": "Archive (delete) a Notion task by page id. Get the id from get_tasks first. Always requires the user's approval banner.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"page_id": {"type": "string"}, "title": {"type": "string", "description": "Task title, for the approval preview"}},
+            "required": ["page_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "delete_calendar_event",
+        "description": "Delete a Google Calendar event by id. Get the id from get_calendar first. Always requires the user's approval banner.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"event_id": {"type": "string"}, "title": {"type": "string", "description": "Event title, for the approval preview"}},
+            "required": ["event_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "ask_local",
+        "description": "Ask Trav's local AI model (Qwen on his own hardware) a question. Use for brainstorming, drafts, or private reasoning when he asks for the local model.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"prompt": {"type": "string"}},
+            "required": ["prompt"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "plan_project",
         "description": "Hand a complex multi-step goal to Sol (planner) and the Opus executor. Call ONCE with a clear objective; steps run in the background and stream into the event feed.",
         "input_schema": {
@@ -152,6 +185,8 @@ Rules:
 - Answer questions about schedule/tasks/email by CALLING TOOLS first. Never invent data.
 - Use ISO 8601 datetimes with the America/New_York offset for calendar writes.
 - send_email only queues for the user's approval; tell him it's waiting on his approval banner.
+- Deletes (delete_task, delete_calendar_event) also queue for approval — look up the id first,
+  then call the delete tool and tell him it's waiting on his banner.
 - Be brief and warm. One short paragraph max in your final reply.
 - For complex multi-step requests (several distinct actions, research projects, bulk work),
   call plan_project ONCE with the full objective. Sol plans it, the Opus executor runs the
@@ -184,6 +219,13 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         if args.get("path"):
             return vault_github.read_file(str(args["path"]))
         return vault_github.search_files(str(args.get("query", "")))
+    if name == "delete_task":
+        notion_api.archive_page(str(args["page_id"]))
+        return {"archived": True, "page_id": args["page_id"], "title": args.get("title", "")}
+    if name == "delete_calendar_event":
+        return gcal.delete_event(str(args["event_id"]))
+    if name == "ask_local":
+        return local_llm.chat(str(args["prompt"]))
     raise ValueError(f"unknown tool {name}")
 
 
@@ -192,6 +234,7 @@ CONNECTOR_AVAILABLE = {
     "notion": notion_api.configured,
     "gmail": gmail_imap.configured,
     "vault": vault_github.configured,
+    "web": local_llm.configured,  # the "web" dot doubles as the local-AI lane
 }
 
 # pending approval id → the action to run on approve

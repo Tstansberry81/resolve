@@ -1,4 +1,5 @@
 .strip {
+  position: relative;
   width: min(680px, 100%);
   margin: 4px auto 0;
   max-height: 200px;
@@ -52,6 +53,23 @@
   border: 1px solid var(--edge);
   color: var(--text-1);
   border-bottom-left-radius: 4px;
+}
+
+.voiceToggle {
+  position: sticky;
+  top: 0;
+  align-self: flex-end;
+  z-index: 2;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  opacity: 0.75;
+}
+
+.voiceToggle:hover {
+  opacity: 1;
 }
 
 .tag {

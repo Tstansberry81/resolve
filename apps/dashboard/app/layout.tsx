@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import "./mobile.css";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -18,6 +19,7 @@ export const metadata: Metadata = {
   title: "RESOLVE — Command Center",
   description:
     "Personal Jarvis platform: durable goals, policy-gated agents, live execution.",
+  appleWebApp: { capable: true, title: "RESOLVE", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {
