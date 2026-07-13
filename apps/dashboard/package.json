@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@picovoice/porcupine-web": "^4.0.1",
+    "@picovoice/web-voice-processor": "^4.0.10",
     "next": "^15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

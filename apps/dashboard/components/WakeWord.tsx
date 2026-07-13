@@ -1,11 +1,14 @@
 "use client";
 
-// Always-on wake-word listener. When armed (👂), it keeps a continuous
-// SpeechRecognition running purely to catch "resolve" / "hey resolve" /
-// "yo resolve" / "what's up resolve". On a hit it flips voice conversation
-// mode on (CommandCore then listens for your command; ChatStrip speaks replies).
-// The mic is single-instance, so while conversation mode is active this listener
-// steps aside and re-arms itself when the conversation ends.
+// Always-on wake-word listener. Two engines, picked automatically:
+//  • Porcupine (Picovoice WASM) when NEXT_PUBLIC_PICOVOICE_ACCESS_KEY is set —
+//    reliable, low-CPU, stays armed indefinitely. The real Jarvis path.
+//  • Web Speech API otherwise — no key needed, but browser-flaky (restarts on
+//    silence, can miss the phrase).
+// Either way, on the wake word it flips voice conversation mode on: CommandCore
+// then listens for your command and ChatStrip speaks the replies. The mic is
+// single-instance, so while a conversation is active this listener steps aside
+// and re-arms when it ends.
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import {
@@ -17,6 +20,7 @@ import {
   subscribeVoice,
 } from "@/lib/voice";
 import { makeRecognition, speak, speechSupported, type SpeechRecognitionLike } from "@/lib/speech";
+import { porcupineConfigured, startPorcupine } from "@/lib/porcupineWake";
 
 const EMPTY = { wakeOn: false, active: false, speaking: false };
 
@@ -29,11 +33,22 @@ export function WakeWord() {
     hydrateWake();
   }, []);
 
-  // Run the wake recognizer only while armed AND not already in a conversation.
+  // Run a wake-word engine only while armed AND not already in a conversation.
   useEffect(() => {
     const shouldListen = voice.wakeOn && !voice.active;
+    if (!shouldListen) return;
 
-    const stop = () => {
+    let stopped = false;
+    let teardownPorcupine: (() => void) | null = null;
+
+    const onWake = () => {
+      if (stopped) return;
+      setActive(true);
+      speak("Yes?");
+    };
+
+    // ── Web Speech fallback ───────────────────────────────────────────────
+    const stopWebSpeech = () => {
       if (restartRef.current) {
         clearTimeout(restartRef.current);
         restartRef.current = null;
@@ -50,13 +65,7 @@ export function WakeWord() {
       }
     };
 
-    if (!shouldListen) {
-      stop();
-      return stop;
-    }
-
-    let stopped = false;
-    const start = () => {
+    const startWebSpeech = () => {
       if (stopped) return;
       const rec = makeRecognition();
       if (!rec) return;
@@ -66,43 +75,56 @@ export function WakeWord() {
       rec.interimResults = true;
       rec.onresult = (e) => {
         let heard = "";
-        for (let i = 0; i < e.results.length; i++) {
-          heard += e.results[i]?.[0]?.transcript ?? "";
-        }
+        for (let i = 0; i < e.results.length; i++) heard += e.results[i]?.[0]?.transcript ?? "";
         if (isWakePhrase(heard)) {
-          // Hand the mic over to the conversation loop.
           rec.onresult = rec.onend = rec.onerror = null;
           try {
             rec.abort();
           } catch {
             /* noop */
           }
-          setActive(true);
-          speak("Yes?");
+          onWake();
         }
       };
-      // Chrome ends continuous recognition after silence — re-arm shortly.
       rec.onend = () => {
-        if (!stopped) restartRef.current = setTimeout(start, 400);
+        if (!stopped) restartRef.current = setTimeout(startWebSpeech, 400);
       };
       rec.onerror = () => {
-        if (!stopped) restartRef.current = setTimeout(start, 800);
+        if (!stopped) restartRef.current = setTimeout(startWebSpeech, 800);
       };
       try {
         rec.start();
       } catch {
-        /* start races an in-flight session; onend will re-arm */
+        /* start races an in-flight session; onend re-arms */
       }
     };
 
-    start();
+    // ── engine selection ──────────────────────────────────────────────────
+    if (porcupineConfigured()) {
+      startPorcupine(onWake)
+        .then((teardown) => {
+          if (stopped) {
+            teardown();
+            return;
+          }
+          teardownPorcupine = teardown;
+        })
+        .catch(() => {
+          // Porcupine failed to init (bad key, activation limit) — degrade.
+          if (!stopped) startWebSpeech();
+        });
+    } else {
+      startWebSpeech();
+    }
+
     return () => {
       stopped = true;
-      stop();
+      if (teardownPorcupine) teardownPorcupine();
+      stopWebSpeech();
     };
   }, [voice.wakeOn, voice.active]);
 
-  if (!speechSupported()) return null;
+  if (!speechSupported() && !porcupineConfigured()) return null;
 
   const label = voice.active
     ? "listening…"
