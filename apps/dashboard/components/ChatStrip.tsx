@@ -11,7 +11,7 @@ import { speak } from "@/lib/speech";
 import { getVoice, subscribeVoice } from "@/lib/voice";
 import styles from "./chatstrip.module.css";
 
-const EMPTY_VOICE = { wakeOn: false, active: false };
+const EMPTY_VOICE = { wakeOn: false, active: false, speaking: false };
 
 interface Bubble {
   id: number;

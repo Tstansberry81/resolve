@@ -12,9 +12,10 @@
 export interface VoiceState {
   wakeOn: boolean;
   active: boolean;
+  speaking: boolean;
 }
 
-let state: VoiceState = { wakeOn: false, active: false };
+let state: VoiceState = { wakeOn: false, active: false, speaking: false };
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -52,6 +53,12 @@ export function setWakeOn(on: boolean): void {
 export function setActive(on: boolean): void {
   if (state.active === on) return;
   state = { ...state, active: on };
+  emit();
+}
+
+export function setSpeaking(on: boolean): void {
+  if (state.speaking === on) return;
+  state = { ...state, speaking: on };
   emit();
 }
 

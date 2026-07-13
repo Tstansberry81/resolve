@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine, useEngine } from "@/lib/useEngine";
-import { makeRecognition, speak, type SpeechRecognitionLike } from "@/lib/speech";
+import { makeRecognition, preloadVoices, speak, type SpeechRecognitionLike } from "@/lib/speech";
 import {
   getVoice,
   isSleepPhrase,
@@ -18,7 +18,7 @@ const STATE_LABEL: Record<string, string> = {
   waiting: "AWAITING YOU",
 };
 
-const EMPTY_VOICE = { wakeOn: false, active: false };
+const EMPTY_VOICE = { wakeOn: false, active: false, speaking: false };
 
 export function CommandCore() {
   const { orb, orbCaption, emergencyStopped } = useEngine();
@@ -60,18 +60,34 @@ export function CommandCore() {
     rec.start();
   };
 
+  useEffect(() => {
+    preloadVoices();
+  }, []);
+
   // Conversation loop — runs while voice mode is active (flipped on by the wake
-  // word). Listens, submits, then re-listens; pauses while RESOLVE is speaking
-  // so it doesn't hear its own voice; "stand down" ends the session.
+  // word). Turn-based for reliability: it never opens the mic while RESOLVE is
+  // speaking (so it can't hear itself), retries if the browser refuses to start
+  // recognition (single-mic contention with the wake listener), and "stand
+  // down" ends the session.
   useEffect(() => {
     if (!voice.active || emergencyStopped) return;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const listenOnce = () => {
+    const arm = (delay: number) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(listenOnce, delay);
+    };
+
+    function isSpeaking() {
+      return getVoice().speaking || window.speechSynthesis?.speaking === true;
+    }
+
+    function listenOnce() {
       if (cancelled || !activeRef.current) return;
-      // wait out any in-flight speech before opening the mic
-      if (typeof window !== "undefined" && window.speechSynthesis?.speaking) {
-        window.setTimeout(listenOnce, 400);
+      // hold the mic shut until we've finished talking
+      if (isSpeaking()) {
+        arm(300);
         return;
       }
       const rec = makeRecognition();
@@ -80,10 +96,12 @@ export function CommandCore() {
       rec.lang = "en-US";
       rec.continuous = false;
       rec.interimResults = false;
+      let got = false;
       setListening(true);
       rec.onresult = (e) => {
         const heard = (e.results[0]?.[0]?.transcript ?? "").trim();
         if (!heard) return;
+        got = true;
         if (isSleepPhrase(heard)) {
           setActive(false);
           speak("Standing down.");
@@ -94,19 +112,26 @@ export function CommandCore() {
       rec.onend = () => {
         setListening(false);
         recRef.current = null;
-        if (!cancelled && activeRef.current) window.setTimeout(listenOnce, 700);
+        if (cancelled || !activeRef.current) return;
+        // after a captured command, give the reply time to arrive and start
+        // speaking; the speaking-gate above then holds until it's done.
+        arm(got ? 1600 : 350);
       };
-      rec.onerror = () => setListening(false);
+      rec.onerror = () => setListening(false); // onend follows and re-arms
       try {
         rec.start();
       } catch {
-        /* start races a prior session; onend re-arms */
+        // mic still held by the wake recognizer — back off and retry
+        recRef.current = null;
+        setListening(false);
+        arm(450);
       }
-    };
+    }
 
-    listenOnce();
+    arm(450); // let the wake recognizer release + the "Yes?" greeting play first
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
       const rec = recRef.current;
       recRef.current = null;
       if (rec) {

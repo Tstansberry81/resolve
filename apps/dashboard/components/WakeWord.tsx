@@ -18,7 +18,7 @@ import {
 } from "@/lib/voice";
 import { makeRecognition, speak, speechSupported, type SpeechRecognitionLike } from "@/lib/speech";
 
-const EMPTY = { wakeOn: false, active: false };
+const EMPTY = { wakeOn: false, active: false, speaking: false };
 
 export function WakeWord() {
   const voice = useSyncExternalStore(subscribeVoice, getVoice, () => EMPTY);
