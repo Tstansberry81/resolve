@@ -69,8 +69,16 @@ export function CommandCore() {
     setText("");
   };
 
-  // Push-to-talk (one-shot) — unchanged behaviour, shared recognizer.
+  // Push-to-talk (one-shot) — and, in voice-conversation mode, a guaranteed
+  // manual interrupt: tap while RESOLVE is talking to cut it off and listen.
   const toggleMic = () => {
+    if (voice.active) {
+      stopBargeIn(); // also stops the STT interrupt listener
+      cancelSpeech(); // kill the reply immediately
+      phaseRef.current = "listening";
+      openMic();
+      return;
+    }
     if (listening) {
       recRef.current?.stop();
       return;

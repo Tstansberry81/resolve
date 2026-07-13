@@ -49,9 +49,18 @@ function rmsOf(analyser: AnalyserNode): number {
 // transcription, no API calls). Once you talk over it for BARGE_SUSTAIN_MS, fire
 // onInterrupt so the caller can cut the reply and capture your command. Returns
 // a teardown you call when the reply ends. Best-effort; works best with the AEC
-// above (or headphones).
-const BARGE_ON = 0.09; // above residual echo, at speaking-voice level
-const BARGE_SUSTAIN_MS = 320;
+// (or headphones).
+//
+// Threshold sits just above the main VAD's speech-onset level (SPEECH_ON=0.045)
+// so a genuine talk-over triggers it, but residual (echo-cancelled) TTS doesn't.
+const BARGE_ON = 0.05;
+const BARGE_SUSTAIN_MS = 240;
+
+// For detection we keep echo cancellation (kills the TTS) but drop auto-gain so
+// your real loudness shows through instead of being normalised flat.
+const INTERRUPT_CONSTRAINTS: MediaStreamConstraints = {
+  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+};
 
 export function listenForInterrupt(onInterrupt: () => void): () => void {
   let stream: MediaStream | null = null;
@@ -74,7 +83,7 @@ export function listenForInterrupt(onInterrupt: () => void): () => void {
   (async () => {
     let s: MediaStream;
     try {
-      s = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+      s = await navigator.mediaDevices.getUserMedia(INTERRUPT_CONSTRAINTS);
     } catch {
       return;
     }
@@ -84,6 +93,7 @@ export function listenForInterrupt(onInterrupt: () => void): () => void {
     }
     stream = s;
     audioCtx = makeAudioContext();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
     audioCtx.createMediaStreamSource(stream).connect(analyser);
