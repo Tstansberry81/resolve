@@ -1,0 +1,4 @@
+# generated on your Mac by `npx cap add ios` / `npm install`
+node_modules/
+ios/
+.DS_Store
