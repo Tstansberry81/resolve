@@ -65,7 +65,10 @@ export function ChatStrip() {
     else speak("Voice on.");
   };
 
-  if (bubbles.length === 0) return null;
+  // While the wake word is armed, collapse the subtitles for a clean voice-only
+  // interface. The reply-speaking effect above still runs (component stays
+  // mounted), so voice output is unaffected.
+  if (bubbles.length === 0 || voice.wakeOn) return null;
 
   return (
     <div className={styles.strip} aria-label="Conversation">
