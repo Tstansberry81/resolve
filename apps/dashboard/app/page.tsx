@@ -10,6 +10,7 @@ import { ApprovalBanners } from "@/components/ApprovalBanners";
 import { VitalsDropdown } from "@/components/VitalsDropdown";
 import { ArtifactsDock } from "@/components/ArtifactsDock";
 import { WakeWord } from "@/components/WakeWord";
+import { LocalExecToggle } from "@/components/LocalExecToggle";
 
 function Clock() {
   return (
@@ -43,6 +44,7 @@ export default function CommandCenter() {
           <div className="header-right">
             <span className="badge">autonomy · execute</span>
             <Clock />
+            <LocalExecToggle />
             <WakeWord />
             {state.emergencyStopped ? (
               <button className="btn btn-resume" onClick={() => engine.resume()}>

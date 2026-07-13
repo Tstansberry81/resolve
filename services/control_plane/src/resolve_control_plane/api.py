@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import __version__, bus, costs, executor, routines, store
+from .connectors import local_llm
 from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
 from .config import load_json, model_choice
 
@@ -127,6 +128,8 @@ async def snapshot() -> dict:
         "connectors": _connector_health(),
         "pendingApprovals": len(pending_actions),
         "costs": costs.snapshot(),
+        "localExec": executor.local_exec,
+        "localAvailable": local_llm.configured(),
     }
 
 
@@ -189,6 +192,16 @@ async def emergency_stop() -> dict:
 async def resume() -> dict:
     await executor.set_halted(False)
     return {"ok": True, "halted": False}
+
+
+class ToggleBody(BaseModel):
+    on: bool
+
+
+@app.post("/v1/settings/local_exec", dependencies=[Depends(auth)])
+async def set_local_exec(body: ToggleBody) -> dict:
+    await executor.set_local_exec(body.on)
+    return {"ok": True, "localExec": executor.local_exec}
 
 
 @app.post("/v1/routines/morning_brief", dependencies=[Depends(auth)])

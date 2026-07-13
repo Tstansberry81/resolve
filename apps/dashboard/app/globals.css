@@ -1527,6 +1527,60 @@ body::before {
   box-shadow: 0 0 60px 12px rgba(62, 224, 255, 0.35);
 }
 
+/* ── local-exec toggle ──────────────────────────────────────────────────── */
+
+.exec-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--edge-soft);
+  background: var(--glass);
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.2s var(--ease-out), border-color 0.2s var(--ease-out),
+    background 0.2s var(--ease-out);
+}
+
+.exec-toggle:hover {
+  color: var(--text);
+  border-color: var(--edge);
+}
+
+.exec-toggle .exec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+/* on = running on the local model */
+.exec-toggle[data-local="true"] {
+  color: #a78bff;
+  border-color: rgba(167, 139, 255, 0.45);
+  background: rgba(167, 139, 255, 0.1);
+}
+
+.exec-toggle[data-local="true"] .exec-dot {
+  background: #a78bff;
+  box-shadow: 0 0 8px rgba(167, 139, 255, 0.7);
+}
+
+/* on but the local box isn't configured/reachable — warn amber */
+.exec-toggle[data-local="true"][data-available="false"] {
+  color: var(--amber);
+  border-color: rgba(240, 180, 40, 0.45);
+  background: rgba(240, 180, 40, 0.1);
+}
+
+.exec-toggle[data-local="true"][data-available="false"] .exec-dot {
+  background: var(--amber);
+  box-shadow: 0 0 8px rgba(240, 180, 40, 0.6);
+}
+
 /* ── accessibility ─────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {

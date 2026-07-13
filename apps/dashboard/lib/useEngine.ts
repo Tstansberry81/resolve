@@ -16,6 +16,7 @@ type EngineLike = {
   submitCommand: (text: string) => void;
   emergencyStop: () => void;
   resume: () => void;
+  setLocalExec: (on: boolean) => void;
 };
 
 const listeners = new Set<() => void>();
@@ -52,6 +53,7 @@ export const engine = {
   submitCommand: (t: string) => current?.submitCommand(t),
   emergencyStop: () => current?.emergencyStop(),
   resume: () => current?.resume(),
+  setLocalExec: (on: boolean) => current?.setLocalExec(on),
   getSnapshot: (): EngineState => current?.getSnapshot() ?? IDLE_STATE,
   subscribe: (fn: () => void) => {
     listeners.add(fn);

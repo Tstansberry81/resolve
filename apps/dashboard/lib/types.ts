@@ -126,4 +126,8 @@ export interface EngineState {
   activeNodes: NodeId[];
   activeEdge: { from: NodeId; to: NodeId } | null;
   emergencyStopped: boolean;
+  /** executor runs on the local model instead of Opus */
+  localExec: boolean;
+  /** a local model is configured (LOCAL_MODEL_URL set) */
+  localAvailable: boolean;
 }

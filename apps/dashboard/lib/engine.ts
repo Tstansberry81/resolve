@@ -69,6 +69,8 @@ class MockEngine {
     activeNodes: [],
     activeEdge: null,
     emergencyStopped: false,
+    localExec: false,
+    localAvailable: false,
   };
 
   private listeners = new Set<() => void>();
@@ -346,6 +348,10 @@ class MockEngine {
       summary: "Execution re-enabled",
     });
     this.runPlaylist();
+  };
+
+  setLocalExec = (on: boolean) => {
+    this.commit({ localExec: on });
   };
 }
 

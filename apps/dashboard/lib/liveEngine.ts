@@ -66,6 +66,8 @@ export class LiveEngine {
     activeNodes: [],
     activeEdge: null,
     emergencyStopped: false,
+    localExec: false,
+    localAvailable: false,
   };
 
   private listeners = new Set<() => void>();
@@ -108,6 +110,8 @@ export class LiveEngine {
         approvals: s.approvals ?? [],
         events: (s.events ?? []).slice().reverse(),
         vitals: vitalsFrom(s.connectors ?? [], s.orb, s.pendingApprovals ?? 0, s.costs),
+        localExec: Boolean(s.localExec),
+        localAvailable: Boolean(s.localAvailable),
       });
     } catch {
       // snapshot refresh is best-effort; SSE keeps flowing
@@ -190,5 +194,14 @@ export class LiveEngine {
     void fetch("/api/cp/v1/resume", { method: "POST" });
     this.commit({ emergencyStopped: false, orbCaption: "Sonnet standing by" });
     void this.loadSnapshot();
+  };
+
+  setLocalExec = (on: boolean) => {
+    void fetch("/api/cp/v1/settings/local_exec", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on }),
+    });
+    this.commit({ localExec: on }); // optimistic; snapshot confirms
   };
 }

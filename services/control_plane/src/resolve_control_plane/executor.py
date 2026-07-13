@@ -21,6 +21,7 @@ import anthropic
 import anyio
 
 from . import bus, costs, store
+from .connectors import local_llm
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
 
@@ -35,6 +36,10 @@ WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_use
 
 queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 halted = False
+# When True (and a local model is configured + reachable), executor steps run on
+# Trav's local Qwen instead of Opus. The planner always stays on Opus. Toggled
+# live from the dashboard; falls back to Opus if the local box is unreachable.
+local_exec = False
 
 PLANNER_SYSTEM = (
     "You are the RESOLVE Planner (Opus). Break the user's goal into 2-6 concrete,"
@@ -69,6 +74,14 @@ PLAN_TOOL = {
 
 def available() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY"))
+
+
+async def set_local_exec(value: bool) -> None:
+    global local_exec
+    local_exec = bool(value)
+    where = "local Qwen" if local_exec else "Opus"
+    await bus.emit("core", "system.exec_backend", f"Executor now runs on {where}",
+                   level="info")
 
 
 async def set_halted(value: bool) -> None:
@@ -139,22 +152,42 @@ async def _mark_task(task_id: str, status: str) -> None:
         pass
 
 
-async def _run_step(item: dict[str, Any]) -> None:
-    from .assistant import (CONNECTOR_AVAILABLE, TOOL_POLICY, TOOLS,
-                            _connector_call, _queue_approval)
+async def _dispatch_tool(name: str, args: dict[str, Any], goal_id: str) -> tuple[str, bool]:
+    """Shared policy + connector execution for both executor backends (Opus and
+    local Qwen). Returns (content_str, is_error)."""
+    from .assistant import CONNECTOR_AVAILABLE, TOOL_POLICY, _connector_call, _queue_approval
+
+    action_name, node = TOOL_POLICY.get(name, (None, "web"))
+    if action_name is None:
+        return "unknown tool", True
+    verdict = evaluate_tool_call(action_name, AutonomyMode.EXECUTE)
+    if verdict.decision == PolicyDecision.DENY:
+        return f"Denied by policy: {verdict.reason}", True
+    if verdict.decision == PolicyDecision.REQUIRE_APPROVAL:
+        await _queue_approval(goal_id, name, dict(args), verdict.risk.value)
+        return "Queued for the user's approval banner; do not retry.", False
+    if not CONNECTOR_AVAILABLE[node]():
+        return f"The {node} connector isn't configured.", True
+    started = time.monotonic()
+    try:
+        result = await anyio.to_thread.run_sync(lambda: _connector_call(name, dict(args)))
+        ms = int((time.monotonic() - started) * 1000)
+        await bus.emit("executor", "tool.call", f"{name} — ok in {ms}ms",
+                       detail=json.dumps(result, default=str)[:400],
+                       edge={"from": "executor", "to": node}, goal_id=goal_id)
+        return json.dumps(result, default=str)[:4000], False
+    except Exception as exc:
+        await bus.emit("executor", "tool.error", f"{name} failed: {exc}",
+                       level="error", goal_id=goal_id)
+        return f"Error: {exc}", True
+
+
+async def _execute_opus(item: dict[str, Any], system: str) -> str:
+    """Anthropic tool-use loop on claude-opus-4-8 (default executor backend)."""
+    from .assistant import TOOLS
 
     goal_id, title = item["goal_id"], item["title"]
-    await _mark_task(item["task_id"], "running")
-    await bus.set_orb("executing", f"Executor working: {title}", ["executor"])
-    await bus.emit("executor", "task.started", f"Executor picked up: {title}",
-                   goal_id=goal_id)
-
     client = anthropic.AsyncAnthropic()
-    system = (
-        "You are the RESOLVE executor (Opus). Complete exactly this step of a larger"
-        f" plan, then summarize the outcome in one sentence.\nGoal: {item['objective']}\n"
-        f"Step: {title}\nInstructions: {item['instructions']}"
-    )
     messages: list[dict[str, Any]] = [{"role": "user", "content": f"Execute the step now: {title}"}]
     outcome = ""
     for _ in range(MAX_STEP_TURNS):
@@ -176,45 +209,100 @@ async def _run_step(item: dict[str, Any]) -> None:
         messages.append({"role": "assistant", "content": resp.content})
         results = []
         for tu in tool_uses:
-            action_name, node = TOOL_POLICY.get(tu.name, (None, "web"))
-            if action_name is None:
-                results.append({"type": "tool_result", "tool_use_id": tu.id,
-                                "content": "unknown tool", "is_error": True})
-                continue
-            verdict = evaluate_tool_call(action_name, AutonomyMode.EXECUTE)
-            if verdict.decision == PolicyDecision.DENY:
-                results.append({"type": "tool_result", "tool_use_id": tu.id,
-                                "content": f"Denied by policy: {verdict.reason}", "is_error": True})
-                continue
-            if verdict.decision == PolicyDecision.REQUIRE_APPROVAL:
-                await _queue_approval(goal_id, tu.name, dict(tu.input), verdict.risk.value)
-                results.append({"type": "tool_result", "tool_use_id": tu.id,
-                                "content": "Queued for the user's approval banner; do not retry."})
-                continue
-            if not CONNECTOR_AVAILABLE[node]():
-                results.append({"type": "tool_result", "tool_use_id": tu.id,
-                                "content": f"The {node} connector isn't configured.", "is_error": True})
-                continue
-            started = time.monotonic()
-            try:
-                result = await anyio.to_thread.run_sync(
-                    lambda: _connector_call(tu.name, dict(tu.input))
-                )
-                ms = int((time.monotonic() - started) * 1000)
-                await bus.emit("executor", "tool.call", f"{tu.name} — ok in {ms}ms",
-                               detail=json.dumps(result, default=str)[:400],
-                               edge={"from": "executor", "to": node}, goal_id=goal_id)
-                results.append({"type": "tool_result", "tool_use_id": tu.id,
-                                "content": json.dumps(result, default=str)[:4000]})
-            except Exception as exc:
-                await bus.emit("executor", "tool.error", f"{tu.name} failed: {exc}",
-                               level="error", goal_id=goal_id)
-                results.append({"type": "tool_result", "tool_use_id": tu.id,
-                                "content": f"Error: {exc}", "is_error": True})
+            content, is_err = await _dispatch_tool(tu.name, dict(tu.input), goal_id)
+            results.append({"type": "tool_result", "tool_use_id": tu.id,
+                            "content": content, "is_error": is_err})
         messages.append({"role": "user", "content": results})
+    return outcome
+
+
+def _openai_tools() -> list[dict[str, Any]]:
+    """Translate the Anthropic tool schema into OpenAI function-tool schema."""
+    from .assistant import TOOLS
+
+    return [
+        {"type": "function",
+         "function": {"name": t["name"], "description": t.get("description", ""),
+                      "parameters": t["input_schema"]}}
+        for t in TOOLS
+    ]
+
+
+async def _execute_local(item: dict[str, Any], system: str) -> str:
+    """OpenAI-compatible tool-calling loop against the local model (Qwen via the
+    Cloudflare tunnel). No Anthropic server web-search here — that's Opus-only.
+    Raises on connection failure so _run_step can fall back to Opus."""
+    from openai import AsyncOpenAI
+
+    goal_id, title = item["goal_id"], item["title"]
+    base = os.environ["LOCAL_MODEL_URL"].rstrip("/")
+    model = os.getenv("LOCAL_MODEL_NAME", "qwen2.5:32b")
+    client = AsyncOpenAI(base_url=base, api_key=os.getenv("LOCAL_MODEL_KEY") or "local")
+    tools = _openai_tools()
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"Execute the step now: {title}"},
+    ]
+    outcome = ""
+    for _ in range(MAX_STEP_TURNS):
+        resp = await client.chat.completions.create(
+            model=model, messages=messages, tools=tools, max_tokens=1500,
+        )
+        msg = resp.choices[0].message
+        if msg.content:
+            outcome = msg.content
+        tool_calls = msg.tool_calls or []
+        if not tool_calls:
+            break
+        messages.append({
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in tool_calls
+            ],
+        })
+        for tc in tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except Exception:
+                args = {}
+            content, _err = await _dispatch_tool(tc.function.name, args, goal_id)
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
+    return outcome
+
+
+async def _run_step(item: dict[str, Any]) -> None:
+    goal_id, title = item["goal_id"], item["title"]
+    await _mark_task(item["task_id"], "running")
+    await bus.set_orb("executing", f"Executor working: {title}", ["executor"])
+    await bus.emit("executor", "task.started", f"Executor picked up: {title}",
+                   goal_id=goal_id)
+
+    system = (
+        "You are the RESOLVE executor. Complete exactly this step of a larger"
+        f" plan, then summarize the outcome in one sentence.\nGoal: {item['objective']}\n"
+        f"Step: {title}\nInstructions: {item['instructions']}"
+    )
+
+    outcome = ""
+    backend = "Opus"
+    # Route to the local model when the toggle is on and it's configured; if the
+    # box is unreachable, fall back to Opus so the step still gets done.
+    if local_exec and local_llm.configured():
+        try:
+            outcome = await _execute_local(item, system)
+            backend = "local Qwen"
+        except Exception as exc:
+            await bus.emit("executor", "task.note",
+                           f"Local model unreachable ({str(exc)[:80]}) — using Opus",
+                           level="warn", goal_id=goal_id)
+    if backend != "local Qwen":
+        outcome = await _execute_opus(item, system)
 
     await _mark_task(item["task_id"], "succeeded")
-    await bus.emit("executor", "task.completed", f"Done: {title} — {outcome[:120]}",
+    await bus.emit("executor", "task.completed", f"Done ({backend}): {title} — {outcome[:120]}",
                    detail=outcome or None, level="success", goal_id=goal_id)
 
 
