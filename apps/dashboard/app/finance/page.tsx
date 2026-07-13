@@ -1,21 +1,27 @@
 "use client";
 
-// Separate finance page — expenses vs. earnings, powered by SimpleFIN (read-only
-// bank data). Reached at /finance, behind the same gate as the dashboard. Bank
-// login happens on SimpleFIN's site; we only ever hold a read-only access token.
+// Separate finance page — checking, savings, and checking P/L, with a net-worth
+// line chart. Powered by SimpleFIN (read-only). Behind the same gate as the app.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import styles from "./finance.module.css";
 
+interface Acct {
+  name: string;
+  balance: number;
+}
 interface Summary {
   days: number;
+  capped: boolean;
+  checking: Acct | null;
+  savings: Acct | null;
+  other: (Acct | null)[];
   netWorth: number;
+  checkingPL: number;
   earnings: number;
   expenses: number;
-  net: number;
-  accounts: { id: string; name: string; org?: string; balance: number; currency: string }[];
-  byMonth: { month: string; earnings: number; expenses: number }[];
+  netWorthSeries: { date: string; value: number }[];
   transactions: {
     id: string;
     account: string;
@@ -31,9 +37,45 @@ const usd = (n: number) =>
 const usd2 = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
+function NetWorthChart({ series }: { series: { date: string; value: number }[] }) {
+  if (series.length < 2) {
+    return <div className={styles.muted}>Net-worth trend appears once there are a few days of history.</div>;
+  }
+  const W = 720;
+  const H = 170;
+  const pad = { l: 4, r: 4, t: 12, b: 18 };
+  const vals = series.map((p) => p.value);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = max - min || 1;
+  const x = (i: number) => pad.l + (i / (series.length - 1)) * (W - pad.l - pad.r);
+  const y = (v: number) => pad.t + (1 - (v - min) / span) * (H - pad.t - pad.b);
+  const line = series.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(series.length - 1).toFixed(1)},${H - pad.b} L${x(0).toFixed(1)},${H - pad.b} Z`;
+  const up = series[series.length - 1].value >= series[0].value;
+  const stroke = up ? "var(--green)" : "var(--red, #ff6b6b)";
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" role="img">
+      <defs>
+        <linearGradient id="nwfill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill="url(#nwfill)" />
+      <path d={line} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" />
+      <text x={pad.l} y={H - 4} className={styles.axis}>{series[0].date.slice(2)}</text>
+      <text x={W - pad.r} y={H - 4} textAnchor="end" className={styles.axis}>
+        {series[series.length - 1].date.slice(2)}
+      </text>
+    </svg>
+  );
+}
+
 export default function FinancePage() {
   const [connected, setConnected] = useState<boolean | null>(null);
-  const [days, setDays] = useState(90);
+  const [days, setDays] = useState(30);
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
   const [token, setToken] = useState("");
@@ -103,25 +145,19 @@ export default function FinancePage() {
     }
   };
 
-  const maxBar = data
-    ? Math.max(1, ...data.byMonth.flatMap((m) => [m.earnings, m.expenses]))
-    : 1;
+  const label = (d: number) => (d === 365 ? "1y" : `${d}d`);
 
   return (
     <div className={styles.page}>
       <div className={styles.head}>
-        <Link href="/" className={styles.back}>
-          ← Command center
-        </Link>
-        <div className={styles.title}>
-          RESOLVE <span>· Finance</span>
-        </div>
+        <Link href="/" className={styles.back}>← Command center</Link>
+        <div className={styles.title}>RESOLVE <span>· Finance</span></div>
         <div className={styles.spacer} />
         {connected && (
           <div className={styles.period}>
-            {[30, 90, 365].map((d) => (
+            {[30, 60, 365].map((d) => (
               <button key={d} data-on={days === d} onClick={() => pickPeriod(d)}>
-                {d === 365 ? "1y" : `${d}d`}
+                {label(d)}
               </button>
             ))}
           </div>
@@ -132,16 +168,12 @@ export default function FinancePage() {
 
       {connected === false && (
         <div className={styles.connect}>
-          <div className={styles.title} style={{ marginBottom: 8 }}>
-            Connect your bank
-          </div>
+          <div className={styles.title} style={{ marginBottom: 8 }}>Connect your bank</div>
           <p className={styles.hint}>
             Go to{" "}
-            <a href="https://beta-bridge.simplefin.org/" target="_blank" rel="noreferrer">
-              SimpleFIN Bridge
-            </a>
-            , connect Bank of America, and paste the <b>Setup Token</b> it gives you below. Your
-            bank login stays on SimpleFIN — RESOLVE only gets read-only data.
+            <a href="https://beta-bridge.simplefin.org/" target="_blank" rel="noreferrer">SimpleFIN Bridge</a>
+            , connect Bank of America, and paste the <b>Setup Token</b> below. Your bank login
+            stays on SimpleFIN — RESOLVE only gets read-only data.
           </p>
           <input
             value={token}
@@ -158,63 +190,35 @@ export default function FinancePage() {
 
       {connected && data && (
         <>
-          <div className={styles.cards}>
+          <div className={styles.cards3}>
             <div className={styles.card}>
-              <div className={styles.label}>Net worth</div>
-              <div className={styles.value}>{usd(data.netWorth)}</div>
+              <div className={styles.label}>Checking</div>
+              <div className={styles.value}>{data.checking ? usd2(data.checking.balance) : "—"}</div>
+              {data.checking && <div className={styles.sub}>{data.checking.name}</div>}
             </div>
             <div className={styles.card}>
-              <div className={styles.label}>Earnings · {days}d</div>
-              <div className={`${styles.value} ${styles.pos}`}>{usd(data.earnings)}</div>
+              <div className={styles.label}>Savings</div>
+              <div className={styles.value}>{data.savings ? usd2(data.savings.balance) : "—"}</div>
+              {data.savings && <div className={styles.sub}>{data.savings.name}</div>}
             </div>
             <div className={styles.card}>
-              <div className={styles.label}>Expenses · {days}d</div>
-              <div className={`${styles.value} ${styles.neg}`}>{usd(data.expenses)}</div>
-            </div>
-            <div className={styles.card}>
-              <div className={styles.label}>Net · {days}d</div>
-              <div className={`${styles.value} ${data.net >= 0 ? styles.pos : styles.neg}`}>
-                {usd(data.net)}
+              <div className={styles.label}>Checking {label(days)} · net</div>
+              <div className={`${styles.value} ${data.checkingPL >= 0 ? styles.pos : styles.neg}`}>
+                {data.checkingPL >= 0 ? "+" : "−"}{usd2(Math.abs(data.checkingPL))}
               </div>
+              <div className={styles.sub}>profit / loss</div>
             </div>
           </div>
 
-          {data.byMonth.length > 0 && (
-            <div className={styles.panel}>
-              <div className={styles.panelTitle}>Earnings vs. expenses by month</div>
-              <div className={styles.bars}>
-                {data.byMonth.map((m) => (
-                  <div key={m.month} className={styles.barCol}>
-                    <div className={styles.barPair}>
-                      <div
-                        className={styles.barIn}
-                        style={{ height: `${(m.earnings / maxBar) * 100}%` }}
-                        title={`In: ${usd2(m.earnings)}`}
-                      />
-                      <div
-                        className={styles.barOut}
-                        style={{ height: `${(m.expenses / maxBar) * 100}%` }}
-                        title={`Out: ${usd2(m.expenses)}`}
-                      />
-                    </div>
-                    <div className={styles.barLabel}>{m.month.slice(2)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           <div className={styles.panel}>
-            <div className={styles.panelTitle}>Accounts</div>
-            {data.accounts.map((a) => (
-              <div key={a.id} className={styles.acct}>
-                <span>
-                  <span className={styles.acctName}>{a.name}</span>
-                  {a.org && <span className={styles.acctOrg}>{a.org}</span>}
-                </span>
-                <span>{usd2(a.balance)}</span>
+            <div className={styles.panelTitle}>Net worth · {usd(data.netWorth)}</div>
+            <NetWorthChart series={data.netWorthSeries} />
+            {data.capped && (
+              <div className={styles.note}>
+                SimpleFIN provides 90 days of history — the 1-year view fills in from here as
+                daily snapshots accumulate.
               </div>
-            ))}
+            )}
           </div>
 
           <div className={styles.panel}>
@@ -227,8 +231,7 @@ export default function FinancePage() {
                   <span className={styles.txnAcct}> · {t.account}</span>
                 </span>
                 <span className={`${styles.txnAmt} ${t.amount >= 0 ? styles.pos : styles.neg}`}>
-                  {t.amount >= 0 ? "+" : "−"}
-                  {usd2(Math.abs(t.amount))}
+                  {t.amount >= 0 ? "+" : "−"}{usd2(Math.abs(t.amount))}
                 </span>
               </div>
             ))}
