@@ -25,7 +25,9 @@ active_nodes: list[str] = []
 # event types worth pinging Telegram about, with a display prefix
 NOTIFY_TYPES = {
     "assistant.reply": "💬 RESOLVE",
-    "approval.requested": "🔔 Approval needed",
+    # approval.requested is notified separately (with inline Approve/Reject
+    # buttons) via telegram_notify.send_approval — keeping it out of this
+    # plain-text fanout avoids two messages per approval.
     "goal.failed": "⚠️ Goal failed",
     "task.completed": "✅ Executor",
     "task.failed": "⚠️ Executor",

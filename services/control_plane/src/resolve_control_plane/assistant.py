@@ -115,6 +115,16 @@ async def _queue_approval(goal_id: str, tool: str, args: dict[str, Any], risk: s
         detail=f"risk: {risk} — waiting on you", level="approval", goal_id=goal_id,
     )
     _fanout_approval(approval_id, summary, risk, preview, "pending")
+    # Push to Telegram with inline Approve/Reject buttons (approvable from phone).
+    try:
+        from .connectors import telegram_notify
+
+        if telegram_notify.configured():
+            await anyio.to_thread.run_sync(
+                lambda: telegram_notify.send_approval(approval_id, summary, risk)
+            )
+    except Exception:
+        pass  # notification must never block queuing the approval
     return approval_id
 
 
