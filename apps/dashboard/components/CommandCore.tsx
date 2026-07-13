@@ -17,7 +17,6 @@ import {
   setActive,
   subscribeVoice,
 } from "@/lib/voice";
-import { listenForInterrupt } from "@/lib/sttRecognition";
 
 const STATE_LABEL: Record<string, string> = {
   idle: "STANDING BY",
@@ -162,27 +161,35 @@ export function CommandCore() {
         /* noop */
       }
     }
-    stopSttBargeIn();
   };
 
-  // STT barge-in: energy-only interrupt detection (no transcription of our own
-  // TTS). When Trav talks over the reply, cut it and capture his command.
-  const sttBargeStopRef = useRef<(() => void) | null>(null);
-  const stopSttBargeIn = () => {
-    const stop = sttBargeStopRef.current;
-    sttBargeStopRef.current = null;
-    stop?.();
-  };
+  // STT barge-in: run the SAME recognizer that captures commands (proven VAD —
+  // it actually hears you), but while RESOLVE is speaking. Filter out our own
+  // TTS via isEcho; a non-echo transcript means you talked over it → cut the
+  // reply and treat what you said as the next command.
   function startSttBargeIn() {
     if (!activeRef.current || phaseRef.current !== "speaking") return;
-    sttBargeStopRef.current = listenForInterrupt(() => {
-      sttBargeStopRef.current = null;
-      cancelSpeech(); // cut the reply the instant he talks over it
-      if (activeRef.current) {
-        phaseRef.current = "listening";
-        openMic();
-      }
-    });
+    const rec = makeRecognition();
+    if (!rec) return;
+    bargeRef.current = rec;
+    rec.lang = "en-US";
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (e) => {
+      const idx = e.results.length - 1;
+      const heard = (e.results[idx]?.[0]?.transcript ?? "").trim();
+      if (!heard || isEcho(heard)) return;
+      stopBargeIn();
+      cancelSpeech();
+      onHeard(heard);
+    };
+    rec.onend = null;
+    rec.onerror = null;
+    try {
+      rec.start();
+    } catch {
+      /* best-effort */
+    }
   }
 
   // Listen WHILE RESOLVE is speaking so Trav can cut it off. The mic hears the
