@@ -82,7 +82,7 @@ export function ChatStrip() {
       {bubbles.map((b) => (
         <div key={b.id} className={b.who === "you" ? styles.rowYou : styles.rowSonnet}>
           <div className={b.who === "you" ? styles.bubbleYou : styles.bubbleSonnet}>
-            {b.who === "sonnet" && <span className={styles.tag}>SONNET</span>}
+            {b.who === "sonnet" && <span className={styles.tag}>RESOLVE</span>}
             {b.text}
           </div>
         </div>
