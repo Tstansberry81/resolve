@@ -26,7 +26,14 @@ const MODEL = process.env.WORKER_MODEL || "claude-opus-4-8";
 const ROOT = path.resolve(
   process.env.RESOLVE_WORKSPACE || path.join(os.homedir(), "resolve-workspace"),
 );
-const MAX_TURNS = 30;
+// The Obsidian vault (second brain). The worker gets vault-aware tools + the
+// vault's CLAUDE.md engrained as its manual so it can run CLAUDE.md-compliant
+// ingests locally against the real files. raw/ + CLAUDE.md are write-protected.
+const VAULT = path.resolve(
+  process.env.VAULT_PATH || path.join(os.homedir(), "Desktop", "Obsidian Vault"),
+);
+const MAX_TURNS = 40;
+let vaultManual = ""; // loaded once from VAULT/CLAUDE.md
 
 const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY
 
@@ -43,13 +50,26 @@ async function emit(taskId, summary, detail) {
   } catch { /* streaming is best-effort */ }
 }
 
-// ── sandbox path guard ──────────────────────────────────────────────────────
+// ── sandbox path guards ─────────────────────────────────────────────────────
 function safePath(rel) {
   const p = path.resolve(ROOT, rel || ".");
   if (p !== ROOT && !p.startsWith(ROOT + path.sep)) {
     throw new Error(`path escapes the workspace sandbox: ${rel}`);
   }
   return p;
+}
+function vaultPath(rel) {
+  const p = path.resolve(VAULT, rel || ".");
+  if (p !== VAULT && !p.startsWith(VAULT + path.sep)) {
+    throw new Error(`path escapes the vault: ${rel}`);
+  }
+  return p;
+}
+function vaultWritableGuard(rel) {
+  const low = String(rel).replace(/^\/+/, "").toLowerCase();
+  if (low.startsWith("raw/") || low === "raw" || low === "claude.md") {
+    throw new Error(`protected: ${rel} — raw/ and CLAUDE.md are read-only (immutable source of truth)`);
+  }
 }
 
 // ── approval round-trip (for shell) ─────────────────────────────────────────
@@ -80,18 +100,26 @@ const TOOLS = [
     input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
   { name: "web_read", description: "Fetch a URL and return its readable text (no JS/interaction).",
     input_schema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } },
+  { name: "vault_read", description: "Read a file from Trav's Obsidian vault (full contents).",
+    input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+  { name: "vault_write", description: "Create/update a vault file (wiki/ or output/). Refuses raw/ and CLAUDE.md.",
+    input_schema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
+  { name: "vault_list", description: "List vault file paths under a prefix (e.g. wiki/, wiki/concepts/, raw/).",
+    input_schema: { type: "object", properties: { prefix: { type: "string" } } } },
+  { name: "vault_search", description: "List vault file paths whose name contains a query.",
+    input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
   { name: "run_shell", description: "Run a shell command in the workspace. ALWAYS asks the user for approval first.",
     input_schema: { type: "object", properties: { command: { type: "string" }, why: { type: "string" } }, required: ["command"] } },
   { name: "finish", description: "Call when the task is complete, with a short result summary.",
     input_schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] } },
 ];
 
-async function walk(dir, out) {
+async function walk(dir, out, base) {
   for (const e of await fs.readdir(dir, { withFileTypes: true })) {
     if (e.name.startsWith(".") || e.name === "node_modules") continue;
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) await walk(full, out);
-    else out.push(path.relative(ROOT, full));
+    if (e.isDirectory()) await walk(full, out, base);
+    else out.push(path.relative(base, full));
   }
 }
 
@@ -121,7 +149,7 @@ async function runTool(taskId, name, args) {
   }
   if (name === "search_files") {
     const out = [];
-    await walk(ROOT, out);
+    await walk(ROOT, out, ROOT);
     const q = String(args.query || "").toLowerCase();
     return out.filter((p) => p.toLowerCase().includes(q)).slice(0, 60).join("\n") || "(no matches)";
   }
@@ -129,6 +157,28 @@ async function runTool(taskId, name, args) {
     const r = await fetch(String(args.url), { redirect: "follow" });
     const body = await r.text();
     return htmlToText(body).slice(0, 12000);
+  }
+  if (name === "vault_read") {
+    return (await fs.readFile(vaultPath(args.path), "utf8")).slice(0, 16000);
+  }
+  if (name === "vault_write") {
+    vaultWritableGuard(args.path);
+    const p = vaultPath(args.path);
+    await fs.mkdir(path.dirname(p), { recursive: true });
+    await fs.writeFile(p, String(args.content ?? ""), "utf8");
+    await emit(taskId, `vault: wrote ${args.path}`);
+    return `wrote ${args.path}`;
+  }
+  if (name === "vault_list") {
+    const out = [];
+    await walk(vaultPath(args.prefix || "."), out, VAULT);
+    return out.slice(0, 250).join("\n") || "(empty)";
+  }
+  if (name === "vault_search") {
+    const out = [];
+    await walk(VAULT, out, VAULT);
+    const q = String(args.query || "").toLowerCase();
+    return out.filter((p) => p.toLowerCase().includes(q)).slice(0, 80).join("\n") || "(no matches)";
   }
   if (name === "run_shell") {
     const cmd = String(args.command || "");
@@ -146,13 +196,32 @@ async function runTool(taskId, name, args) {
 }
 
 // ── the agent loop for one task ─────────────────────────────────────────────
+async function loadVaultManual() {
+  if (vaultManual) return vaultManual;
+  try {
+    vaultManual = await fs.readFile(path.join(VAULT, "CLAUDE.md"), "utf8");
+  } catch {
+    vaultManual = "";
+  }
+  return vaultManual;
+}
+
 async function runTask(taskId, task) {
   await emit(taskId, `Local worker picked up: ${String(task).slice(0, 120)}`);
-  const system =
+  const manual = await loadVaultManual();
+  let system =
     "You are the RESOLVE local worker running on Trav's Mac. Accomplish the task using your " +
     `tools. Files are sandboxed to the workspace at ${ROOT}. run_shell requires Trav's approval ` +
     "and should be used sparingly and safely — never destructive commands. Read before you write. " +
     "When done, call finish with a concise summary of what you did.";
+  if (manual) {
+    system +=
+      `\n\n--- SECOND BRAIN ---\nTrav's Obsidian vault is at ${VAULT}. Use the vault_* tools for ` +
+      "it (vault_read/list/search/write; raw/ and CLAUDE.md are read-only). For ANY vault work — " +
+      "especially an ingest — follow its operating manual below EXACTLY (the ingest pipeline, " +
+      "honest calibration, frontmatter, [[wikilinks]], index/log upkeep). This manual is the " +
+      "source of truth for all vault interactions:\n\n" + manual;
+  }
   const messages = [{ role: "user", content: String(task) }];
   let summary = "";
   for (let i = 0; i < MAX_TURNS; i++) {
