@@ -26,7 +26,7 @@ from .connectors import vault_github
 log = logging.getLogger("resolve.ingest")
 
 INGEST_MODEL = os.getenv("INGEST_MODEL", "claude-opus-4-8")
-MAX_TURNS = 30
+MAX_TURNS = 44
 
 # event types that represent real activity worth ingesting (skip bookkeeping rows)
 _ACTIVITY = {"goal.accepted", "assistant.reply", "task.completed", "goal.completed",
@@ -147,6 +147,7 @@ async def run_daily_ingest(day_iso: str | None = None) -> dict:
     messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
     result_summary = ""
     written: list[str] = []
+    nudges = 0
 
     for _ in range(MAX_TURNS):
         resp = await client.messages.create(
@@ -158,6 +159,21 @@ async def run_daily_ingest(day_iso: str | None = None) -> dict:
             texts = [b.text for b in resp.content if b.type == "text"]
             if texts:
                 result_summary = texts[-1]
+            # The model narrated instead of calling a tool — it's not actually
+            # done until it calls finish(). Nudge it to complete the manual's
+            # remaining steps (index/overview/propagation), a few times.
+            if nudges < 4:
+                nudges += 1
+                if texts:
+                    messages.append({"role": "assistant", "content": resp.content})
+                messages.append({"role": "user", "content": (
+                    "You haven't called finish yet. Keep going and COMPLETE the ingest per the "
+                    "manual: refresh wiki/index.md (add the new pages), update wiki/overview.md if "
+                    "the picture shifted, and propagate the day's facts into the relevant "
+                    "entities/ and concepts/ pages (read each with vault_read first, then "
+                    "vault_write). Only call finish once those steps are actually done."
+                )})
+                continue
             break
         messages.append({"role": "assistant", "content": resp.content})
         results = []
