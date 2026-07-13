@@ -13,6 +13,10 @@ from __future__ import annotations
 import datetime
 import threading
 
+from . import store
+
+_ROLLUP_TYPE = "cost.rollup"  # persisted daily totals in agent_events (survive restarts)
+
 # USD per 1,000,000 tokens: (input, output). Matches Anthropic list pricing.
 PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-4-8": (5.0, 25.0),
@@ -25,6 +29,7 @@ _DEFAULT_PRICE = (5.0, 25.0)  # unknown model → assume Opus-tier, don't under-
 _lock = threading.Lock()
 _day = ""
 _by_role: dict[str, dict] = {}
+_dirty = False
 
 
 def _today() -> str:
@@ -55,6 +60,7 @@ def record(role: str, model: str, usage: object) -> None:
 
     p_in, p_out = PRICING.get(model, _DEFAULT_PRICE)
     usd = in_tok / 1_000_000 * p_in + out_tok / 1_000_000 * p_out
+    global _dirty
     with _lock:
         _roll_locked()
         row = _by_role.setdefault(
@@ -65,6 +71,51 @@ def record(role: str, model: str, usage: object) -> None:
         row["out"] += out_tok
         row["usd"] += usd
         row["calls"] += 1
+        _dirty = True
+
+
+def load_seed() -> None:
+    """After a restart, reseed today's in-memory totals from the last persisted
+    rollup so 'cost today' doesn't drop to zero on every redeploy. Blocking — call
+    from a thread, not the event loop."""
+    global _by_role, _day
+    try:
+        rows = store.select("agent_events", {
+            "event_type": f"eq.{_ROLLUP_TYPE}", "order": "created_at.desc", "limit": "1",
+        })
+    except Exception:
+        return
+    if not rows:
+        return
+    p = rows[0].get("payload") or {}
+    if isinstance(p, str):
+        import json
+        try:
+            p = json.loads(p)
+        except Exception:
+            return
+    if p.get("date") != _today():
+        return  # last rollup is from a previous day — start fresh
+    with _lock:
+        _day = _today()
+        _by_role = {r: dict(v) for r, v in (p.get("roles") or {}).items()}
+
+
+def persist() -> None:
+    """Flush today's totals to agent_events if changed. Blocking — call from a
+    thread (e.g. the 60s scheduler tick), never the event loop."""
+    global _dirty
+    with _lock:
+        if not _dirty:
+            return
+        _roll_locked()
+        payload = {"date": _day or _today(), "roles": {r: dict(v) for r, v in _by_role.items()}}
+        _dirty = False
+    try:
+        store.insert("agent_events", {"event_type": _ROLLUP_TYPE, "actor": "core", "payload": payload})
+    except Exception:
+        with _lock:
+            _dirty = True  # retry next tick
 
 
 def snapshot() -> dict:

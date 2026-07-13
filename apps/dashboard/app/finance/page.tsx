@@ -15,6 +15,7 @@ interface Acct {
 interface Summary {
   days: number;
   capped: boolean;
+  lastFetch: string | null;
   checking: Acct | null;
   savings: Acct | null;
   other: (Acct | null)[];
@@ -37,6 +38,17 @@ const usd = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const usd2 = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+function fmtWhen(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return d.toLocaleDateString();
+}
 
 function NetWorthChart({ series }: { series: { date: string; value: number }[] }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -109,11 +121,14 @@ export default function FinancePage() {
   const [err, setErr] = useState("");
   const [showAllTxns, setShowAllTxns] = useState(false);
 
-  const loadSummary = useCallback(async (d: number) => {
+  const loadSummary = useCallback(async (d: number, refresh = false) => {
     setLoading(true);
     setErr("");
     try {
-      const r = await fetch(`/api/cp/v1/finance/summary?days=${d}`, { cache: "no-store" });
+      const r = await fetch(
+        `/api/cp/v1/finance/summary?days=${d}${refresh ? "&refresh=1" : ""}`,
+        { cache: "no-store" },
+      );
       if (r.status === 409) {
         setConnected(false);
         return;
@@ -183,13 +198,23 @@ export default function FinancePage() {
         <div className={styles.title}>RESOLVE <span>· Finance</span></div>
         <div className={styles.spacer} />
         {connected && (
-          <div className={styles.period}>
-            {[30, 60, 365].map((d) => (
-              <button key={d} data-on={days === d} onClick={() => pickPeriod(d)}>
-                {label(d)}
-              </button>
-            ))}
-          </div>
+          <>
+            <button
+              className={styles.refresh}
+              title="Pull fresh data from your bank now"
+              onClick={() => loadSummary(days, true)}
+              disabled={loading}
+            >
+              ↻
+            </button>
+            <div className={styles.period}>
+              {[30, 60, 365].map((d) => (
+                <button key={d} data-on={days === d} onClick={() => pickPeriod(d)}>
+                  {label(d)}
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -240,7 +265,12 @@ export default function FinancePage() {
           </div>
 
           <div className={styles.panel}>
-            <div className={styles.panelTitle}>Net worth · {usd(data.netWorth)}</div>
+            <div className={styles.panelTitle}>
+              Net worth · {usd(data.netWorth)}
+              {data.lastFetch && (
+                <span className={styles.updated}> · updated {fmtWhen(data.lastFetch)}</span>
+              )}
+            </div>
             <NetWorthChart series={data.netWorthSeries} />
             {data.capped && (
               <div className={styles.note}>

@@ -46,4 +46,9 @@ async def scheduler_loop() -> None:
                 await run_morning_brief()
         except Exception:
             log.exception("routine tick failed")
+        try:
+            from . import costs
+            await asyncio.to_thread(costs.persist)  # flush cost totals to Supabase
+        except Exception:
+            log.exception("cost flush failed")
         await asyncio.sleep(60)

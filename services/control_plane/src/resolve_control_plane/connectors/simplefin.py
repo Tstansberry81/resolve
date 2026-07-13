@@ -22,6 +22,7 @@ import requests
 from .. import store
 
 _SNAP_TYPE = "finance.snapshot"
+_RAW_TYPE = "finance.raw"  # cached raw SimpleFIN pull (once/day) in agent_events
 
 
 def _stored_access_url() -> str | None:
@@ -75,12 +76,55 @@ def claim(setup_token: str) -> str:
     return access_url
 
 
-def _fetch(days: int) -> dict[str, Any]:
+def _cached_raw(max_age_hours: float = 20.0) -> dict[str, Any] | None:
+    """Most recent cached SimpleFIN pull, if it's still fresh enough to reuse."""
+    try:
+        rows = store.select("agent_events", {
+            "event_type": f"eq.{_RAW_TYPE}", "order": "created_at.desc", "limit": "1",
+        })
+    except Exception:
+        return None
+    if not rows:
+        return None
+    ts = rows[0].get("created_at")
+    try:
+        dt = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        age_h = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 3600
+        if age_h > max_age_hours:
+            return None
+    except Exception:
+        return None
+    p = rows[0].get("payload") or {}
+    if isinstance(p, str):
+        try:
+            p = json.loads(p)
+        except Exception:
+            return None
+    return p.get("data")
+
+
+def last_fetch_iso() -> str | None:
+    try:
+        rows = store.select("agent_events", {
+            "event_type": f"eq.{_RAW_TYPE}", "order": "created_at.desc", "limit": "1",
+        })
+        return rows[0].get("created_at") if rows else None
+    except Exception:
+        return None
+
+
+def _fetch(force: bool = False) -> dict[str, Any]:
+    """Pull the full 90-day window, but at most once/day: served from the Supabase
+    cache unless it's stale or a refresh is forced. Cuts SimpleFIN calls to ~1/day."""
+    if not force:
+        cached = _cached_raw()
+        if cached is not None:
+            return cached
     access_url = _stored_access_url()
     if not access_url:
         raise RuntimeError("SimpleFIN not connected")
     start = int(
-        (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)).timestamp()
+        (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=90)).timestamp()
     )
     r = requests.get(
         f"{access_url.rstrip('/')}/accounts",
@@ -88,7 +132,15 @@ def _fetch(days: int) -> dict[str, Any]:
         timeout=30,
     )
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    try:
+        store.insert("agent_events", {
+            "event_type": _RAW_TYPE, "actor": "core",
+            "payload": {"data": data, "fetched": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+        })
+    except Exception:
+        pass
+    return data
 
 
 def _classify(accounts: list[dict[str, Any]]):
@@ -153,11 +205,13 @@ def _record_snapshot(day: str, checking: float, savings: float, net_worth: float
         pass
 
 
-def summary(days: int = 30) -> dict[str, Any]:
+def summary(days: int = 30, refresh: bool = False) -> dict[str, Any]:
     """Simplified money view: checking + savings balances, checking net P/L over
     the window, a net-worth line series (reconstructed from ≤90d of transactions,
-    extended over time by daily snapshots), and recent transactions."""
-    data = _fetch(min(days, 90))  # SimpleFIN caps history at 90 days
+    extended over time by daily snapshots), and recent transactions.
+
+    Reads from the once/day Supabase cache unless `refresh` is set."""
+    data = _fetch(force=refresh)  # cached; SimpleFIN caps history at 90 days
     parsed: list[dict[str, Any]] = []
     txns_out: list[dict[str, Any]] = []
     day_delta: dict[str, float] = defaultdict(float)  # date -> net amount that day (all accounts)
@@ -231,6 +285,7 @@ def summary(days: int = 30) -> dict[str, Any]:
     return {
         "days": days,
         "capped": days > 90,
+        "lastFetch": last_fetch_iso(),
         "checking": acct_out(checking),
         "savings": acct_out(savings),
         "other": [acct_out(a) for a in others],

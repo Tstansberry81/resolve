@@ -54,6 +54,23 @@
 
 .spacer { flex: 1; }
 
+.refresh {
+  background: var(--glass);
+  border: 1px solid var(--edge-soft);
+  color: var(--text-dim);
+  border-radius: 999px;
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+  cursor: pointer;
+  margin-right: 8px;
+  transition: color 0.2s, border-color 0.2s;
+}
+.refresh:hover:not(:disabled) { color: var(--green); border-color: rgba(53, 227, 156, 0.4); }
+.refresh:disabled { opacity: 0.5; cursor: default; }
+
+.updated { color: var(--text-dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
 .period {
   display: inline-flex;
   gap: 4px;

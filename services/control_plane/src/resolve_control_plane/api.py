@@ -19,6 +19,10 @@ app = FastAPI(title="RESOLVE Control Plane", version=__version__)
 
 @app.on_event("startup")
 async def _start_worker() -> None:
+    try:
+        await anyio.to_thread.run_sync(costs.load_seed)  # restore today's cost total
+    except Exception:
+        pass
     asyncio.get_running_loop().create_task(executor.worker_loop())
     asyncio.get_running_loop().create_task(routines.scheduler_loop())
 
@@ -229,12 +233,12 @@ async def finance_connect(body: ConnectBody) -> dict:
 
 
 @app.get("/v1/finance/summary", dependencies=[Depends(auth)])
-async def finance_summary(days: int = 90) -> dict:
+async def finance_summary(days: int = 90, refresh: bool = False) -> dict:
     if not simplefin.configured():
         raise HTTPException(status_code=409, detail="not connected")
     days = max(1, min(days, 365))
     try:
-        return await anyio.to_thread.run_sync(lambda: simplefin.summary(days))
+        return await anyio.to_thread.run_sync(lambda: simplefin.summary(days, refresh))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"SimpleFIN fetch failed: {exc}")
 
