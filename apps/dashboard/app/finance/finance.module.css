@@ -1,9 +1,30 @@
 .page {
+  position: relative;
+  z-index: 1; /* sit above the fixed starfield canvas (z-index: 0) */
   min-height: 100vh;
   max-width: 1040px;
   margin: 0 auto;
   padding: 28px 22px 80px;
   color: var(--text);
+}
+
+.moreBtn {
+  width: 100%;
+  margin-top: 10px;
+  background: transparent;
+  border: 1px solid var(--edge-soft);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  padding: 8px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.moreBtn:hover {
+  color: var(--text);
+  border-color: var(--edge);
+  background: var(--glass);
 }
 
 .head {

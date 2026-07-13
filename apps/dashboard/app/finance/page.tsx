@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { Starfield } from "@/components/Starfield";
 import styles from "./finance.module.css";
 
 interface Acct {
@@ -81,6 +82,7 @@ export default function FinancePage() {
   const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [err, setErr] = useState("");
+  const [showAllTxns, setShowAllTxns] = useState(false);
 
   const loadSummary = useCallback(async (d: number) => {
     setLoading(true);
@@ -148,6 +150,8 @@ export default function FinancePage() {
   const label = (d: number) => (d === 365 ? "1y" : `${d}d`);
 
   return (
+    <>
+    <Starfield />
     <div className={styles.page}>
       <div className={styles.head}>
         <Link href="/" className={styles.back}>← Command center</Link>
@@ -223,7 +227,7 @@ export default function FinancePage() {
 
           <div className={styles.panel}>
             <div className={styles.panelTitle}>Recent transactions</div>
-            {data.transactions.map((t) => (
+            {(showAllTxns ? data.transactions : data.transactions.slice(0, 3)).map((t) => (
               <div key={t.id} className={`${styles.txn} ${t.pending ? styles.pending : ""}`}>
                 <span className={styles.txnDate}>{t.date}</span>
                 <span>
@@ -238,11 +242,17 @@ export default function FinancePage() {
             {data.transactions.length === 0 && (
               <div className={styles.muted}>No transactions in this period.</div>
             )}
+            {data.transactions.length > 3 && (
+              <button className={styles.moreBtn} onClick={() => setShowAllTxns((v) => !v)}>
+                {showAllTxns ? "Show fewer ▴" : `Show all ${data.transactions.length} ▾`}
+              </button>
+            )}
           </div>
         </>
       )}
 
       {loading && connected && <div className={styles.muted}>Refreshing…</div>}
     </div>
+    </>
   );
 }
