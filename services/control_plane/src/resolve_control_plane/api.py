@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import __version__, bus, costs, executor, routines, store
-from .connectors import local_llm
+from .connectors import local_llm, simplefin
 from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
 from .config import load_json, model_choice
 
@@ -202,6 +202,41 @@ class ToggleBody(BaseModel):
 async def set_local_exec(body: ToggleBody) -> dict:
     await executor.set_local_exec(body.on)
     return {"ok": True, "localExec": executor.local_exec}
+
+
+# ── finance (SimpleFIN) ─────────────────────────────────────────────────────
+
+
+class ConnectBody(BaseModel):
+    setup_token: str
+
+
+@app.get("/v1/finance/status", dependencies=[Depends(auth)])
+def finance_status() -> dict:
+    return {"connected": simplefin.configured()}
+
+
+@app.post("/v1/finance/connect", dependencies=[Depends(auth)])
+async def finance_connect(body: ConnectBody) -> dict:
+    token = (body.setup_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="setup_token required")
+    try:
+        await anyio.to_thread.run_sync(lambda: simplefin.claim(token))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SimpleFIN claim failed: {exc}")
+    return {"ok": True, "connected": simplefin.configured()}
+
+
+@app.get("/v1/finance/summary", dependencies=[Depends(auth)])
+async def finance_summary(days: int = 90) -> dict:
+    if not simplefin.configured():
+        raise HTTPException(status_code=409, detail="not connected")
+    days = max(1, min(days, 365))
+    try:
+        return await anyio.to_thread.run_sync(lambda: simplefin.summary(days))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SimpleFIN fetch failed: {exc}")
 
 
 @app.post("/v1/routines/morning_brief", dependencies=[Depends(auth)])

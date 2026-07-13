@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEngine, engine } from "@/lib/useEngine";
 import { Starfield } from "@/components/Starfield";
 import { ChatStrip } from "@/components/ChatStrip";
@@ -44,6 +45,9 @@ export default function CommandCenter() {
           <div className="header-right">
             <span className="badge">autonomy · execute</span>
             <Clock />
+            <Link href="/finance" className="nav-link" title="Expenses & earnings">
+              $ Finance
+            </Link>
             <LocalExecToggle />
             <WakeWord />
             {state.emergencyStopped ? (
