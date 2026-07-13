@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import __version__, bus, costs, executor, local, routines, store
+from . import __version__, artifacts, bus, costs, executor, local, routines, store
 from .connectors import local_llm, simplefin
 from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
 from .config import load_json, model_choice
@@ -21,6 +21,7 @@ app = FastAPI(title="RESOLVE Control Plane", version=__version__)
 async def _start_worker() -> None:
     try:
         await anyio.to_thread.run_sync(costs.load_seed)  # restore today's cost total
+        await anyio.to_thread.run_sync(artifacts.load_seed)  # restore artifact dock
     except Exception:
         pass
     asyncio.get_running_loop().create_task(executor.worker_loop())
@@ -128,7 +129,7 @@ async def snapshot() -> dict:
         "goals": goals,
         "events": bus.recent_events(),
         "approvals": approvals,
-        "artifacts": [],
+        "artifacts": artifacts.recent(),
         "connectors": _connector_health(),
         "pendingApprovals": len(pending_actions),
         "costs": costs.snapshot(),
@@ -269,6 +270,27 @@ def local_result(body: ResultBody) -> dict:
 async def local_event(body: EventBody) -> dict:
     await bus.emit("executor", "local.event", body.summary, detail=body.detail,
                    edge={"from": "executor", "to": "web"}, goal_id=body.taskId or None)
+    return {"ok": True}
+
+
+class LocalArtifactBody(BaseModel):
+    name: str
+    path: str
+    location: str = "local"  # local | vault
+    href: str = ""           # worker supplies file:// so links resolve on-disk
+    action: str = "created"  # created | updated
+    taskId: str = ""
+
+
+@app.post("/v1/local/artifact", dependencies=[Depends(auth)])
+async def local_artifact(body: LocalArtifactBody) -> dict:
+    """The laptop worker reports a file it created/changed so it lands in the
+    Artifacts dock with a clickable link that resolves on Trav's Mac."""
+    def _rec():
+        return artifacts.record(body.name, body.path, location=body.location,
+                                href=body.href or None, action=body.action,
+                                goal_id=body.taskId or None)
+    await anyio.to_thread.run_sync(_rec)
     return {"ok": True}
 
 

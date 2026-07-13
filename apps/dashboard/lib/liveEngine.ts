@@ -8,6 +8,7 @@ import { AGENTS } from "./roster";
 import type {
   AgentEvent,
   Approval,
+  Artifact,
   ConnectorHealth,
   EngineState,
   Vitals,
@@ -109,6 +110,7 @@ export class LiveEngine {
         goals: s.goals ?? [],
         approvals: s.approvals ?? [],
         events: (s.events ?? []).slice().reverse(),
+        artifacts: s.artifacts ?? [],
         vitals: vitalsFrom(s.connectors ?? [], s.orb, s.pendingApprovals ?? 0, s.costs),
         localExec: Boolean(s.localExec),
         localAvailable: Boolean(s.localAvailable),
@@ -153,6 +155,10 @@ export class LiveEngine {
         const a = msg.approval as Approval;
         const rest = this.state.approvals.filter((x) => x.id !== a.id);
         this.commit({ approvals: [a, ...rest] });
+      } else if (msg.kind === "artifact") {
+        const art = msg.artifact as Artifact;
+        const rest = this.state.artifacts.filter((x) => x.id !== art.id);
+        this.commit({ artifacts: [art, ...rest].slice(0, 40) });
       }
     };
     this.es.onerror = () => {

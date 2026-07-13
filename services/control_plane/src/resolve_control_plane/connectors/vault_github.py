@@ -48,6 +48,11 @@ def append_log(title: str, lines: list[str]) -> dict:
         timeout=15,
     )
     put.raise_for_status()
+    try:
+        from .. import artifacts
+        artifacts.record_vault(LOG_PATH, action="updated")
+    except Exception:
+        pass
     return {"committed": True, "path": LOG_PATH, "title": title}
 
 
@@ -83,6 +88,11 @@ def write_file(path: str, content: str, message: str = "") -> dict:
         body["sha"] = sha
     put = requests.put(url, headers=_headers(), json=body, timeout=20)
     put.raise_for_status()
+    try:
+        from .. import artifacts
+        artifacts.record_vault(norm, action="updated" if sha else "created")
+    except Exception:
+        pass
     return {"committed": True, "path": norm, "updated": sha is not None}
 
 

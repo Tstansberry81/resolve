@@ -22,10 +22,32 @@ function createWindow() {
 
   win.loadURL(APP_URL);
 
-  // external links open in the real browser, not inside the app window
+  // tell the dashboard it's running inside the desktop shell, so artifact
+  // file:// links reveal in Finder instead of copying the path
+  win.webContents.on("dom-ready", () => {
+    win.webContents.executeJavaScript("window.resolveDesktop = true;").catch(() => {});
+  });
+
+  const openLink = (url) => {
+    if (url && url.startsWith("file://")) {
+      // reveal the artifact in Finder rather than navigating the app to it
+      shell.showItemInFolder(decodeURIComponent(url.replace(/^file:\/\//, "")));
+    } else {
+      shell.openExternal(url);
+    }
+  };
+
+  // external links open in the real browser / Finder, not inside the app window
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openLink(url);
     return { action: "deny" };
+  });
+  // artifact local links render in-window (no target) → intercept the navigation
+  win.webContents.on("will-navigate", (e, url) => {
+    if (!url.startsWith(APP_URL)) {
+      e.preventDefault();
+      openLink(url);
+    }
   });
 }
 

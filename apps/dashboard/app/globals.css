@@ -1020,6 +1020,19 @@ body::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: block;
+}
+
+a.artifact-link {
+  color: var(--text-1);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s var(--ease-out);
+}
+
+a.artifact-link:hover {
+  color: var(--cyan);
+  text-decoration: underline;
 }
 
 .artifact-meta {

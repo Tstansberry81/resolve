@@ -87,6 +87,12 @@ export interface Artifact {
   name: string;
   meta: string;
   ts: number;
+  /** clickable link to the file: GitHub blob for vault, file:// for local, web URL for cloud drives */
+  href?: string;
+  /** where the file lives: local | vault | gdrive | onedrive */
+  location?: string;
+  /** full path (tooltip / clipboard fallback for local files) */
+  path?: string;
 }
 
 export interface ConnectorHealth {

@@ -49,6 +49,23 @@ async function emit(taskId, summary, detail) {
     await cp("/v1/local/event", { method: "POST", body: JSON.stringify({ taskId, summary, detail }) });
   } catch { /* streaming is best-effort */ }
 }
+// Report a file we created/changed so it lands in the dashboard Artifacts dock
+// with a clickable link. absPath is the real on-disk path (→ file:// href).
+async function artifact(taskId, absPath, location, action = "created") {
+  try {
+    await cp("/v1/local/artifact", {
+      method: "POST",
+      body: JSON.stringify({
+        taskId,
+        name: path.basename(absPath),
+        path: absPath,
+        location,
+        href: `file://${absPath}`,
+        action,
+      }),
+    });
+  } catch { /* best-effort */ }
+}
 
 // ── sandbox path guards ─────────────────────────────────────────────────────
 function safePath(rel) {
@@ -138,9 +155,11 @@ async function runTool(taskId, name, args) {
   }
   if (name === "write_file") {
     const p = safePath(args.path);
+    const existed = await fs.access(p).then(() => true).catch(() => false);
     await fs.mkdir(path.dirname(p), { recursive: true });
     await fs.writeFile(p, String(args.content ?? ""), "utf8");
     await emit(taskId, `wrote ${args.path}`);
+    await artifact(taskId, p, "local", existed ? "updated" : "created");
     return `wrote ${args.path}`;
   }
   if (name === "list_dir") {
@@ -164,9 +183,11 @@ async function runTool(taskId, name, args) {
   if (name === "vault_write") {
     vaultWritableGuard(args.path);
     const p = vaultPath(args.path);
+    const existed = await fs.access(p).then(() => true).catch(() => false);
     await fs.mkdir(path.dirname(p), { recursive: true });
     await fs.writeFile(p, String(args.content ?? ""), "utf8");
     await emit(taskId, `vault: wrote ${args.path}`);
+    await artifact(taskId, p, "vault", existed ? "updated" : "created");
     return `wrote ${args.path}`;
   }
   if (name === "vault_list") {
