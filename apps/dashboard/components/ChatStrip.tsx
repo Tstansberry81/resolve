@@ -4,34 +4,14 @@
 // Sonnet's answers (and her clarifying questions) are impossible to miss.
 // Pure view over the event feed — works identically in mock and live mode.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useEngine } from "@/lib/useEngine";
 import type { AgentEvent } from "@/lib/types";
+import { speak } from "@/lib/speech";
+import { getVoice, subscribeVoice } from "@/lib/voice";
 import styles from "./chatstrip.module.css";
 
-// British male voice for Sonnet's replies; picks the best en-GB voice around
-// (Daniel on macOS/iOS, Google UK English Male on Chrome).
-function pickVoice(): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis?.getVoices() ?? [];
-  return (
-    voices.find((v) => v.name === "Daniel") ??
-    voices.find((v) => v.name.includes("UK English Male")) ??
-    voices.find((v) => v.lang === "en-GB") ??
-    null
-  );
-}
-
-function speak(text: string) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  const clean = text.replace(/[*_#`]/g, "").slice(0, 600);
-  const u = new SpeechSynthesisUtterance(clean);
-  const voice = pickVoice();
-  if (voice) u.voice = voice;
-  u.lang = "en-GB";
-  u.rate = 1.02;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
-}
+const EMPTY_VOICE = { wakeOn: false, active: false };
 
 interface Bubble {
   id: number;
@@ -58,20 +38,24 @@ export function ChatStrip() {
   const bubbles = toBubbles(state.events);
   const endRef = useRef<HTMLDivElement>(null);
   const spokenRef = useRef<number>(0);
+  const voice = useSyncExternalStore(subscribeVoice, getVoice, () => EMPTY_VOICE);
   const [voiceOn, setVoiceOn] = useState(false);
 
   useEffect(() => {
     setVoiceOn(localStorage.getItem("resolve_voice") === "on");
   }, []);
 
+  // Speak replies when the manual toggle is on OR voice conversation mode is live.
+  const speakOn = voiceOn || voice.active;
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     const last = bubbles[bubbles.length - 1];
-    if (voiceOn && last && last.who === "sonnet" && last.id > spokenRef.current) {
+    if (speakOn && last && last.who === "sonnet" && last.id > spokenRef.current) {
       spokenRef.current = last.id;
       speak(last.text);
     }
-  }, [bubbles, voiceOn]);
+  }, [bubbles, speakOn]);
 
   const toggleVoice = () => {
     const next = !voiceOn;

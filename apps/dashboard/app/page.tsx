@@ -9,6 +9,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ApprovalBanners } from "@/components/ApprovalBanners";
 import { VitalsDropdown } from "@/components/VitalsDropdown";
 import { ArtifactsDock } from "@/components/ArtifactsDock";
+import { WakeWord } from "@/components/WakeWord";
 
 function Clock() {
   return (
@@ -42,6 +43,7 @@ export default function CommandCenter() {
           <div className="header-right">
             <span className="badge">autonomy · execute</span>
             <Clock />
+            <WakeWord />
             {state.emergencyStopped ? (
               <button className="btn btn-resume" onClick={() => engine.resume()}>
                 RESUME
