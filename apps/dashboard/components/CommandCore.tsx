@@ -88,87 +88,147 @@ export function CommandCore() {
     preloadVoices();
   }, []);
 
-  // Conversation loop — runs while voice mode is active (flipped on by the wake
-  // word). Turn-based for reliability: it never opens the mic while RESOLVE is
-  // speaking (so it can't hear itself), retries if the browser refuses to start
-  // recognition (single-mic contention with the wake listener), and "stand
-  // down" ends the session.
-  useEffect(() => {
-    if (!voice.active || emergencyStopped) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+  // ── Voice conversation loop (strictly turn-based) ────────────────────────
+  // Phases: listening → awaiting (mic shut, waiting on the reply) → speaking
+  // (reply plays, mic shut) → listening. The mic is NEVER open while RESOLVE is
+  // talking, so its own voice can't leak back in. CommandCore speaks the reply
+  // itself (ChatStrip stays quiet in voice mode) so it controls the hand-back.
+  const phaseRef = useRef<"off" | "listening" | "awaiting" | "speaking">("off");
+  const pendingIdRef = useRef<number>(-1);
+  const awaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
 
-    const arm = (delay: number) => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(listenOnce, delay);
-    };
+  const maxEventId = () => {
+    let m = -1;
+    for (const e of eventsRef.current) if (e.id > m) m = e.id;
+    return m;
+  };
+  const speakingNow = () =>
+    getVoice().speaking || window.speechSynthesis?.speaking === true;
 
-    function isSpeaking() {
-      return getVoice().speaking || window.speechSynthesis?.speaking === true;
-    }
-
-    function listenOnce() {
-      if (cancelled || !activeRef.current) return;
-      // hold the mic shut until we've finished talking
-      if (isSpeaking()) {
-        arm(300);
-        return;
-      }
-      const rec = makeRecognition();
-      if (!rec) return;
-      recRef.current = rec;
-      rec.lang = "en-US";
-      rec.continuous = false;
-      rec.interimResults = false;
-      let got = false;
-      setListening(true);
-      rec.onresult = (e) => {
-        const heard = (e.results[0]?.[0]?.transcript ?? "").trim();
-        if (!heard) return;
-        got = true;
-        if (isSleepPhrase(heard)) {
-          setActive(false);
-          speak("Standing down.");
-          return;
-        }
-        engine.submitCommand(heard);
-      };
-      rec.onend = () => {
-        setListening(false);
-        recRef.current = null;
-        if (cancelled || !activeRef.current) return;
-        // after a captured command, give the reply time to arrive and start
-        // speaking; the speaking-gate above then holds until it's done.
-        arm(got ? 1600 : 350);
-      };
-      rec.onerror = () => setListening(false); // onend follows and re-arms
+  const stopConvMic = () => {
+    const r = recRef.current;
+    recRef.current = null;
+    if (r) {
+      r.onresult = r.onend = r.onerror = null;
       try {
-        rec.start();
+        r.abort();
       } catch {
-        // mic still held by the wake recognizer — back off and retry
-        recRef.current = null;
-        setListening(false);
-        arm(450);
+        /* noop */
       }
     }
+  };
 
-    arm(450); // let the wake recognizer release + the "Yes?" greeting play first
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-      const rec = recRef.current;
-      recRef.current = null;
-      if (rec) {
-        rec.onresult = rec.onend = rec.onerror = null;
-        try {
-          rec.abort();
-        } catch {
-          /* noop */
-        }
+  const onHeard = (heard: string) => {
+    setListening(false);
+    if (isSleepPhrase(heard)) {
+      phaseRef.current = "off";
+      setActive(false);
+      speak("Standing down.");
+      return;
+    }
+    phaseRef.current = "awaiting";
+    pendingIdRef.current = maxEventId();
+    engine.submitCommand(heard);
+    // safety: if no reply ever comes back, reopen the mic rather than hang
+    if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
+    awaitTimerRef.current = setTimeout(() => {
+      if (phaseRef.current === "awaiting" && activeRef.current) {
+        phaseRef.current = "listening";
+        openMic();
       }
+    }, 20000);
+  };
+
+  function openMic() {
+    if (!activeRef.current || phaseRef.current === "off") return;
+    if (speakingNow()) {
+      window.setTimeout(openMic, 250); // wait until we're done talking
+      return;
+    }
+    const rec = makeRecognition();
+    if (!rec) return;
+    recRef.current = rec;
+    rec.lang = "en-US";
+    rec.continuous = false;
+    rec.interimResults = false;
+    phaseRef.current = "listening";
+    setListening(true);
+    let got = false;
+    rec.onresult = (e) => {
+      const heard = (e.results[0]?.[0]?.transcript ?? "").trim();
+      if (!heard) return;
+      got = true;
+      recRef.current = null;
+      try {
+        rec.abort();
+      } catch {
+        /* noop */
+      }
+      onHeard(heard);
+    };
+    rec.onend = () => {
+      setListening(false);
+      if (recRef.current === rec) recRef.current = null;
+      // silence/timeout with nothing captured — reopen the mic
+      if (!got && activeRef.current && phaseRef.current === "listening") {
+        window.setTimeout(openMic, 300);
+      }
+    };
+    rec.onerror = () => setListening(false);
+    try {
+      rec.start();
+    } catch {
+      window.setTimeout(openMic, 400);
+    }
+  }
+
+  // start/stop the loop with voice mode
+  useEffect(() => {
+    if (!voice.active || emergencyStopped) {
+      phaseRef.current = "off";
+      if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
+      stopConvMic();
+      setListening(false);
+      return;
+    }
+    phaseRef.current = "listening";
+    const t = setTimeout(openMic, 500); // let the "Yes?" greeting play first
+    return () => {
+      phaseRef.current = "off";
+      clearTimeout(t);
+      if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
+      stopConvMic();
       setListening(false);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.active, emergencyStopped]);
+
+  // while awaiting, watch for RESOLVE's reply, speak it, then reopen the mic
+  useEffect(() => {
+    if (phaseRef.current !== "awaiting") return;
+    let reply: { id: number; text: string } | null = null;
+    for (const e of events) {
+      if (e.type === "assistant.reply" && e.id > pendingIdRef.current) {
+        if (!reply || e.id > reply.id) reply = { id: e.id, text: e.detail ?? e.summary };
+      }
+    }
+    if (!reply) return;
+    if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
+    phaseRef.current = "speaking";
+    speak(reply.text, {
+      onend: () => {
+        if (activeRef.current) {
+          phaseRef.current = "listening";
+          openMic();
+        } else {
+          phaseRef.current = "off";
+        }
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
 
   const micActive = listening || voice.active;
 

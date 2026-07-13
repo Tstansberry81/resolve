@@ -45,8 +45,10 @@ export function ChatStrip() {
     setVoiceOn(localStorage.getItem("resolve_voice") === "on");
   }, []);
 
-  // Speak replies when the manual toggle is on OR voice conversation mode is live.
-  const speakOn = voiceOn || voice.active;
+  // Speak replies for the manual 🔊 toggle only. In voice conversation mode
+  // (wake word), CommandCore's turn-based loop speaks the reply itself so it
+  // controls the mic hand-back — ChatStrip must stay quiet to avoid double audio.
+  const speakOn = voiceOn && !voice.active;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
