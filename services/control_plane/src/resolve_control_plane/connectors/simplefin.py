@@ -40,19 +40,35 @@ def configured() -> bool:
 
 def claim(setup_token: str) -> str:
     """Exchange a one-time SimpleFIN Setup Token for a durable Access URL and
-    persist it. Returns the Access URL (a secret — don't surface it)."""
+    persist it. Returns the Access URL (a secret — don't surface it).
+
+    Setup tokens are SINGLE-USE, so we verify we can persist BEFORE consuming the
+    token — otherwise a claim can succeed while the save fails, wasting the token.
+    """
+    if not os.getenv("SIMPLEFIN_ACCESS_URL"):
+        try:
+            store.select("simplefin", {"limit": "1"})  # table must exist + be reachable
+        except Exception as exc:
+            raise RuntimeError(
+                "Storage not ready — create the 'simplefin' table first "
+                "(run infra/postgres/002_simplefin.sql in the Supabase SQL editor), "
+                "then paste a NEW setup token. "
+                f"({exc})"
+            )
+
     token = setup_token.strip()
     claim_url = base64.b64decode(token).decode("utf-8").strip()
     resp = requests.post(claim_url, timeout=20)
+    if resp.status_code == 403:
+        raise RuntimeError(
+            "SimpleFIN rejected this token (403) — it was already used. Setup tokens "
+            "are single-use; generate a fresh one on SimpleFIN Bridge and paste that."
+        )
     resp.raise_for_status()
     access_url = resp.text.strip()
     if not access_url.startswith("http"):
         raise ValueError("SimpleFIN claim did not return an access URL")
-    try:
-        store.insert("simplefin", {"access_url": access_url})
-    except Exception:
-        # DB unavailable (table not created) — caller can still set the env var.
-        pass
+    store.insert("simplefin", {"access_url": access_url})
     return access_url
 
 
