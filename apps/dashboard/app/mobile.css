@@ -1,57 +1,136 @@
-/* Chat-first mobile layout: command core + conversation up top, everything
-   else stacks below and scrolls. Desktop is untouched. */
+/* Mobile / installed-app layout. Chat-first: command core + conversation up top,
+   everything else stacks and scrolls. Desktop (>700px) is untouched. Tuned for
+   the Capacitor iOS shell: safe-area insets, app-like scroll, generous targets. */
 
 @media (max-width: 700px) {
+  html,
+  body {
+    /* stop rubber-band horizontal drift */
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
   .v2-app {
     height: auto;
-    min-height: 100vh;
+    min-height: 100dvh; /* dynamic viewport — accounts for iOS toolbars */
     overflow: visible;
   }
 
+  /* ── header: compact, safe-area aware, no ugly wrap ──────────────────── */
   .v2-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
-    padding: 10px 12px;
+    padding: calc(env(safe-area-inset-top) + 10px) 12px 10px;
+    background: rgba(7, 9, 14, 0.82);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--edge-soft);
   }
 
-  .header-right .clock {
+  .header-right {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  /* trim noise on a small screen (keep the LIVE/MOCK badge) */
+  .header-right .clock,
+  .header-right .badge:not(.badge-live):not(.badge-mock) {
     display: none;
   }
 
+  /* pills/links comfortable to tap */
+  .nav-link,
+  .wake-toggle,
+  .exec-toggle {
+    padding: 7px 12px;
+    font-size: 12px;
+  }
+
+  .btn-stop,
+  .btn-resume {
+    margin-left: auto; /* push the big action to the right edge */
+    padding: 8px 14px;
+  }
+
+  /* ── main: single column ─────────────────────────────────────────────── */
   .v2-main {
     flex-direction: column;
   }
 
   .v2-center {
     order: 0;
-    padding: 0 12px;
+    padding: 4px 14px 0;
   }
 
   .sidebar {
     order: 1;
     width: 100%;
-    padding: 0 12px 24px;
+    padding: 0 14px 24px;
   }
 
+  /* ── orb: sized to the screen, no negative-margin clipping ───────────── */
   .orb-stage {
-    transform: scale(0.72);
-    margin: -28px 0;
+    transform: scale(0.82);
+    transform-origin: center;
+    margin: -10px auto 0;
   }
 
-  .constellation {
-    display: none; /* the show-piece stays a big-screen thing */
+  .core-state {
+    font-size: 12px;
+  }
+
+  /* ── command bar: big taps, no iOS focus-zoom ────────────────────────── */
+  .command-bar {
+    gap: 8px;
+  }
+  .command-bar input {
+    font-size: 16px; /* >=16px stops iOS auto-zoom on focus */
+    padding: 12px 12px;
+  }
+  .command-bar .mic,
+  .command-bar .send {
+    min-width: 44px;
+    min-height: 44px; /* Apple HIG touch target */
+  }
+
+  .constellation-v2 {
+    display: none; /* the showpiece stays a big-screen thing */
   }
 
   .artifacts-corner {
     position: static;
     width: auto;
     max-height: none;
-    margin: 0 12px 24px;
+    margin: 0 14px calc(env(safe-area-inset-bottom) + 24px);
   }
 
   .banner-stack {
     left: 8px;
     right: 8px;
     width: auto;
+    top: calc(env(safe-area-inset-top) + 8px);
+  }
+
+  /* chat bubbles use the width they've got */
+  .v2-center [class*="bubble"] {
+    max-width: 88vw;
+  }
+}
+
+/* very small phones */
+@media (max-width: 380px) {
+  .orb-stage {
+    transform: scale(0.72);
+  }
+  .brand-name {
+    font-size: 15px;
   }
 }

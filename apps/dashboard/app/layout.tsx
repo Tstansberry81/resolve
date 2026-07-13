@@ -24,6 +24,11 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#07090e",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false, // app-like: no accidental pinch-zoom
+  viewportFit: "cover", // let content flow under the notch, we pad with safe-area
 };
 
 export default function RootLayout({
