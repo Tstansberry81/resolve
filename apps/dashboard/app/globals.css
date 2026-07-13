@@ -1065,15 +1065,24 @@ body::before {
 
 .v2-center {
   flex: 1;
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center; /* orb sits at the true center, agents orbit it */
   min-width: 0;
   min-height: 0;
-  /* right padding clears the fixed artifacts corner so the tree's right edge
-     (Reviewer / Web) is never covered; keeps the orb on the true centerline
-     between the two rails */
-  padding: 0 330px 0 20px;
+  padding: 0 24px;
+}
+
+/* right column: the conversation log, vertically centered */
+.v2-chat {
+  width: 340px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 14px 0 4px;
+  overflow: hidden;
 }
 
 @media (max-width: 1100px) {
@@ -1087,6 +1096,7 @@ body::before {
   flex-direction: column;
   align-items: center;
   position: relative;
+  z-index: 1; /* orb + command bar float above the orbiting agents */
   padding-top: 2px;
 }
 
@@ -1095,14 +1105,14 @@ body::before {
 }
 
 .core-v2 .orb-stage {
-  width: 168px;
-  height: 168px;
-  margin: 2px 0 0;
+  width: 232px;
+  height: 232px;
+  margin: 6px 0 0;
 }
 
 .core-v2 .orb {
-  width: 96px;
-  height: 96px;
+  width: 140px;
+  height: 140px;
 }
 
 .core-v2 .command-bar {
@@ -1113,10 +1123,11 @@ body::before {
 /* ── constellation v2: the delegation tree under the core ──────────────── */
 
 .constellation-v2 {
-  flex: 1;
-  width: min(880px, 100%);
-  min-height: 0;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   display: flex;
+  pointer-events: none; /* backdrop of orbiting agents behind the orb */
 }
 
 /* the v2 container has a definite height (flex child of a 100vh column), so

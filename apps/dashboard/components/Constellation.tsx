@@ -43,82 +43,71 @@ export function Constellation() {
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
-    const positions = () => {
+    // Radial: the assistant sits at the center; agents orbit her on an inner
+    // ring, connectors on an outer ring — everything slowly revolving.
+    const positions = (t: number) => {
       const pos = new Map<NodeId, { x: number; y: number }>();
-      pos.set("assistant", { x: w / 2, y: h * 0.16 });
-      const span = Math.min(w * 0.86, 760);
-      const left = (w - span) / 2;
+      const cx = w / 2;
+      const cy = h / 2;
+      pos.set("assistant", { x: cx, y: cy });
+      const rot = reduced ? 0 : t * 0.00004;
+      const base = Math.min(w, h);
+      const r1 = base * 0.28;
       AGENT_ROW.forEach((id, i) => {
-        pos.set(id, { x: left + (span / (AGENT_ROW.length - 1)) * i, y: h * 0.52 });
+        const ang = rot - Math.PI / 2 + (i / AGENT_ROW.length) * Math.PI * 2;
+        pos.set(id, { x: cx + Math.cos(ang) * r1, y: cy + Math.sin(ang) * r1 });
       });
-      const cspan = Math.min(w * 0.7, 600);
-      const cleft = (w - cspan) / 2;
+      const r2 = base * 0.45;
       CONNECTORS.forEach((c, i) => {
-        pos.set(c.id, { x: cleft + (cspan / (CONNECTORS.length - 1)) * i, y: h * 0.86 });
+        // counter-rotate the outer ring a touch for depth
+        const ang = -rot * 0.55 - Math.PI / 2 + (i / CONNECTORS.length) * Math.PI * 2;
+        pos.set(c.id, { x: cx + Math.cos(ang) * r2, y: cy + Math.sin(ang) * r2 });
       });
       return pos;
     };
 
-    const curve = (
+    const line = (
       p1: { x: number; y: number },
       p2: { x: number; y: number },
     ) => {
       ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
-      const midY = (p1.y + p2.y) / 2;
-      ctx.bezierCurveTo(p1.x, midY, p2.x, midY, p2.x, p2.y);
+      ctx.lineTo(p2.x, p2.y);
       ctx.stroke();
     };
 
-    const pointOnCurve = (
+    const pointOnLine = (
       p1: { x: number; y: number },
       p2: { x: number; y: number },
       k: number,
-    ) => {
-      const midY = (p1.y + p2.y) / 2;
-      const c1 = { x: p1.x, y: midY };
-      const c2 = { x: p2.x, y: midY };
-      const u = 1 - k;
-      return {
-        x: u * u * u * p1.x + 3 * u * u * k * c1.x + 3 * u * k * k * c2.x + k * k * k * p2.x,
-        y: u * u * u * p1.y + 3 * u * u * k * c1.y + 3 * u * k * k * c2.y + k * k * k * p2.y,
-      };
-    };
+    ) => ({ x: p1.x + (p2.x - p1.x) * k, y: p1.y + (p2.y - p1.y) * k });
 
     const draw = (t: number) => {
       const state = engine.getSnapshot();
       const active = new Set(state.activeNodes);
       const hot = state.activeEdge;
-      const pos = positions();
+      const pos = positions(t);
       ctx.clearRect(0, 0, w, h);
 
-      // input beam: the orb (above this canvas) feeding the assistant
+      // center glow: the assistant pulses when the orb is live
       const a = pos.get("assistant")!;
       const beamOn = state.orb !== "idle" && !state.emergencyStopped;
-      ctx.strokeStyle = beamOn ? "rgba(62,224,255,0.35)" : "rgba(148,163,184,0.08)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(a.x, 0);
-      ctx.lineTo(a.x, a.y - 14);
-      ctx.stroke();
       if (beamOn && !reduced) {
-        const k = (t % 900) / 900;
-        ctx.fillStyle = "#3ee0ff";
-        ctx.shadowColor = "#3ee0ff";
-        ctx.shadowBlur = 8;
+        const k = 0.5 + 0.5 * Math.sin(t * 0.004);
+        ctx.strokeStyle = `rgba(62,224,255,${0.06 + k * 0.12})`;
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(a.x, (a.y - 14) * k, 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        ctx.arc(a.x, a.y, Math.min(w, h) * 0.28, 0, Math.PI * 2);
+        ctx.stroke();
       }
 
-      // static hierarchy edges (the real reporting lines)
+      // static hierarchy edges (the real reporting lines) — now radial spokes
       ctx.strokeStyle = "rgba(148,163,184,0.10)";
       ctx.lineWidth = 1;
       for (const [from, to] of HIERARCHY_EDGES) {
         const p1 = pos.get(from);
         const p2 = pos.get(to);
-        if (p1 && p2) curve(p1, p2);
+        if (p1 && p2) line(p1, p2);
       }
 
       // hot edge: an actual handoff in flight (any pair, incl. connectors)
@@ -131,10 +120,10 @@ export function Constellation() {
           grad.addColorStop(1, "rgba(62,224,255,0.70)");
           ctx.strokeStyle = grad;
           ctx.lineWidth = 1.6;
-          curve(p1, p2);
+          line(p1, p2);
           if (!reduced) {
             const k = (t % 1100) / 1100;
-            const p = pointOnCurve(p1, p2, k);
+            const p = pointOnLine(p1, p2, k);
             ctx.fillStyle = "#3ee0ff";
             ctx.shadowColor = "#3ee0ff";
             ctx.shadowBlur = 10;
@@ -188,10 +177,9 @@ export function Constellation() {
       };
 
       for (const ag of AGENTS) {
-        if (ag.id === "assistant") continue;
+        if (ag.id === "assistant") continue; // the orb IS the assistant, at the center
         drawNode(ag.id, ag.label, ag.model, "agent");
       }
-      drawNode("assistant", "Assistant", AGENT_META.assistant.model, "assistant");
       CONNECTORS.forEach((c) => drawNode(c.id, c.label, null, "connector"));
 
       raf = requestAnimationFrame(draw);

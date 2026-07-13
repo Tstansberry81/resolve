@@ -66,9 +66,11 @@ export default function CommandCenter() {
           <Sidebar />
           <section className="v2-center">
             <CommandCore />
-            <ChatStrip />
             <Constellation />
           </section>
+          <aside className="v2-chat">
+            <ChatStrip />
+          </aside>
         </div>
       </main>
 

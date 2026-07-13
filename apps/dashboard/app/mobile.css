@@ -67,7 +67,14 @@
 
   .v2-center {
     order: 0;
+    justify-content: flex-start; /* chat-first stack, not vertically centered */
     padding: 4px 14px 0;
+  }
+
+  .v2-chat {
+    order: 0;
+    width: 100%;
+    padding: 8px 14px 0;
   }
 
   .sidebar {
