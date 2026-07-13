@@ -1,0 +1,30 @@
+{
+  "name": "resolve-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RESOLVE — native desktop app (Electron) around the hosted dashboard. Personal use.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.tstansberry.resolve",
+    "productName": "RESOLVE",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "icon.png"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg"],
+      "identity": null,
+      "icon": "icon.png",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "RESOLVE uses the microphone for voice commands and the wake word."
+      }
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}
