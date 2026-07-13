@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import __version__, bus, costs, executor, routines, store
+from . import __version__, bus, costs, executor, local, routines, store
 from .connectors import local_llm, simplefin
 from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
 from .config import load_json, model_choice
@@ -134,6 +134,7 @@ async def snapshot() -> dict:
         "costs": costs.snapshot(),
         "localExec": executor.local_exec,
         "localAvailable": local_llm.configured(),
+        "localWorker": local.online(),
     }
 
 
@@ -230,6 +231,55 @@ async def finance_connect(body: ConnectBody) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"SimpleFIN claim failed: {exc}")
     return {"ok": True, "connected": simplefin.configured()}
+
+
+# ── local worker (laptop hands) ─────────────────────────────────────────────
+
+
+class ResultBody(BaseModel):
+    taskId: str
+    summary: str = ""
+
+
+class EventBody(BaseModel):
+    taskId: str = ""
+    summary: str
+    detail: str | None = None
+
+
+class LocalApprovalBody(BaseModel):
+    taskId: str = ""
+    summary: str
+    detail: str = ""
+    risk: str = "local_shell"
+
+
+@app.get("/v1/local/next", dependencies=[Depends(auth)])
+def local_next() -> dict:
+    return local.next_task() or {}
+
+
+@app.post("/v1/local/result", dependencies=[Depends(auth)])
+def local_result(body: ResultBody) -> dict:
+    local.set_result(body.taskId, body.summary)
+    return {"ok": True}
+
+
+@app.post("/v1/local/event", dependencies=[Depends(auth)])
+async def local_event(body: EventBody) -> dict:
+    await bus.emit("executor", "local.event", body.summary, detail=body.detail,
+                   edge={"from": "executor", "to": "web"}, goal_id=body.taskId or None)
+    return {"ok": True}
+
+
+@app.post("/v1/local/approval", dependencies=[Depends(auth)])
+def local_approval(body: LocalApprovalBody) -> dict:
+    return {"id": local.request_approval(body.taskId, body.summary, body.detail, body.risk)}
+
+
+@app.get("/v1/local/approval/{approval_id}", dependencies=[Depends(auth)])
+def local_approval_status(approval_id: str) -> dict:
+    return {"status": local.approval_status(approval_id)}
 
 
 @app.get("/v1/finance/summary", dependencies=[Depends(auth)])

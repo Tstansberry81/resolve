@@ -105,6 +105,9 @@
     "plan.project": {
       "risk": "reversible_write"
     },
+    "laptop.dispatch": {
+      "risk": "reversible_write"
+    },
     "vault.read": {
       "risk": "read"
     },

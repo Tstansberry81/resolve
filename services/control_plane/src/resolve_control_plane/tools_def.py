@@ -20,6 +20,7 @@ TOOL_POLICY = {
     "delete_calendar_event": ("calendar.delete", "calendar"),
     "ask_local": ("local.ask", "web"),
     "get_finance": ("finance.read", "finance"),
+    "run_on_laptop": ("laptop.dispatch", "local"),
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -142,6 +143,16 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "run_on_laptop",
+        "description": "Dispatch a task to Trav's laptop (the local worker): reading/writing files in his workspace, searching, reading web pages, or running shell commands (shell asks his approval). Use when he explicitly wants something done ON his machine. Give a clear, self-contained task; it runs in the background and streams into the feed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task": {"type": "string", "description": "Full self-contained task for the laptop agent"}},
+            "required": ["task"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "get_finance",
         "description": "Get Trav's money summary from his connected bank (SimpleFIN): net worth, earnings, expenses, net, by-month, and recent transactions over the last `days` (default 30). Use for any spending/income/balance question.",
         "input_schema": {
@@ -191,6 +202,8 @@ How you operate:
 - send_email only queues for Trav's approval; tell him it's waiting on his approval banner.
 - Deletes (delete_task, delete_calendar_event) also queue for approval — look up the id first,
   then call the delete tool and tell him it's waiting on his banner.
+- When Trav wants something done ON his laptop (his files, running a command, reading a web
+  page for him), use run_on_laptop with a clear task. Shell commands there ask for his approval.
 - Keep replies tight — a sentence or a short paragraph. Humor is welcome; padding is not.
 - For complex multi-step requests (several distinct actions, research projects, bulk work),
   call plan_project ONCE with the full objective. The Planner (Opus 4.8) plans it, the Opus

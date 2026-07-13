@@ -1,0 +1,13 @@
+{
+  "name": "resolve-local-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RESOLVE local worker — a Claude agent with sandboxed files, approval-gated shell, and web-read. Runs on your Mac.",
+  "scripts": {
+    "start": "node worker.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1"
+  }
+}

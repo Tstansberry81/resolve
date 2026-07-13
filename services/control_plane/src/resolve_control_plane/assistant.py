@@ -68,6 +68,9 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         s = simplefin.summary(int(args.get("days", 30)))
         # trim the transaction list for the model — it just needs the shape
         return {**s, "transactions": s.get("transactions", [])[:15]}
+    if name == "run_on_laptop":
+        from . import local
+        return local.enqueue(str(args["task"]))
     raise ValueError(f"unknown tool {name}")
 
 
@@ -78,6 +81,7 @@ CONNECTOR_AVAILABLE = {
     "vault": vault_github.configured,
     "web": local_llm.configured,  # the "web" dot doubles as the local-AI lane
     "finance": simplefin.configured,
+    "local": lambda: __import__("resolve_control_plane.local", fromlist=["online"]).online(),
 }
 
 # pending approval id → the action to run on approve
@@ -152,6 +156,12 @@ def _fanout_approval(approval_id: str, summary: str, risk: str, preview: list[st
 
 
 async def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
+    # local-worker shell approvals are decided here too, but executed on the
+    # laptop (not in the cloud) — just record the decision for the worker to poll.
+    from . import local
+    if local.is_local_approval(approval_id):
+        local.decide(approval_id, "approved" if decision == "approved" else "rejected")
+        return {"ok": True, "local": True, "decision": decision}
     action = pending_actions.pop(approval_id, None)
     status = "approved" if decision == "approved" else "rejected"
     try:
