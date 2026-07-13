@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine, useEngine } from "@/lib/useEngine";
 import {
   cancelSpeech,
+  isMobile,
   makeRecognition,
   preloadVoices,
   speak,
@@ -297,7 +298,7 @@ export function CommandCore() {
         }
       },
     });
-    startBargeIn(); // let Trav talk over it
+    if (!isMobile()) startBargeIn(); // talk-over on desktop only (iOS mutes replies)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 

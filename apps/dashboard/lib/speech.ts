@@ -39,6 +39,16 @@ export function speechSupported(): boolean {
   return Boolean(w.SpeechRecognition ?? w.webkitSpeechRecognition);
 }
 
+// iOS/Android: a live recognizer and audio playback fight over the audio session,
+// so barge-in (listening while speaking) mutes replies. Detect mobile to disable it.
+export function isMobile(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iP(hone|ad|od)|Android/i.test(navigator.userAgent) ||
+    (navigator.maxTouchPoints || 0) > 1
+  );
+}
+
 // British male voice for RESOLVE's replies (Daniel on macOS/iOS,
 // "Google UK English Male" on Chrome), falling back to any en-GB voice.
 export function pickVoice(): SpeechSynthesisVoice | null {
