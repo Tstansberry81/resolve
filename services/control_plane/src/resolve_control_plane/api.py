@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import __version__, bus, executor, routines, store
+from . import __version__, bus, costs, executor, routines, store
 from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
 from .config import load_json, model_choice
 
@@ -126,6 +126,7 @@ async def snapshot() -> dict:
         "artifacts": [],
         "connectors": _connector_health(),
         "pendingApprovals": len(pending_actions),
+        "costs": costs.snapshot(),
     }
 
 

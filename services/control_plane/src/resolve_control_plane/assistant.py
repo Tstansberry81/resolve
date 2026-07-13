@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 import anyio
 
-from . import bus, executor, store
+from . import bus, costs, executor, store
 from .connectors import gcal, gmail_imap, local_llm, notion_api, vault_github
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
@@ -224,6 +224,7 @@ async def _loop(goal_id: str, text: str) -> None:
                 tools=TOOLS,
                 messages=messages,
             )
+            costs.record("assistant", ASSISTANT_MODEL, resp.usage)
             tool_uses = [b for b in resp.content if b.type == "tool_use"]
             texts = [b.text for b in resp.content if b.type == "text"]
             if texts:

@@ -23,15 +23,32 @@ const ALL_CONNECTORS: ConnectorHealth[] = [
   { id: "web", label: "Web", status: "down", latencyMs: 0 },
 ];
 
-function vitalsFrom(connectors: ConnectorHealth[], orb: string, pending: number): Vitals {
+interface CostSnapshot {
+  models?: { role: string; model?: string; costTodayUsd?: number; tokensToday?: number }[];
+  totalCostTodayUsd?: number;
+  tokensToday?: number;
+}
+
+function vitalsFrom(
+  connectors: ConnectorHealth[],
+  orb: string,
+  pending: number,
+  costs?: CostSnapshot,
+): Vitals {
   const byId = new Map(connectors.map((c) => [c.id, c]));
+  const costByRole = new Map((costs?.models ?? []).map((m) => [m.role, m]));
   return {
     connectors: ALL_CONNECTORS.map((c) => byId.get(c.id) ?? c),
-    models: AGENTS.map((a) => ({ role: a.id, model: a.model, p50Ms: 0, costTodayUsd: 0 })),
+    models: AGENTS.map((a) => ({
+      role: a.id,
+      model: a.model,
+      p50Ms: 0,
+      costTodayUsd: costByRole.get(a.id)?.costTodayUsd ?? 0,
+    })),
     queueDepth: pending,
     errorRate: 0,
-    tokensToday: 0,
-    costTodayUsd: 0,
+    tokensToday: costs?.tokensToday ?? 0,
+    costTodayUsd: costs?.totalCostTodayUsd ?? 0,
     workerStatus: orb === "executing" ? "executing" : "idle",
   };
 }
@@ -90,7 +107,7 @@ export class LiveEngine {
         goals: s.goals ?? [],
         approvals: s.approvals ?? [],
         events: (s.events ?? []).slice().reverse(),
-        vitals: vitalsFrom(s.connectors ?? [], s.orb, s.pendingApprovals ?? 0),
+        vitals: vitalsFrom(s.connectors ?? [], s.orb, s.pendingApprovals ?? 0, s.costs),
       });
     } catch {
       // snapshot refresh is best-effort; SSE keeps flowing

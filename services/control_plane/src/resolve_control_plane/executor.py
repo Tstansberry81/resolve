@@ -20,7 +20,7 @@ from typing import Any
 import anthropic
 import anyio
 
-from . import bus, store
+from . import bus, costs, store
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
 
@@ -94,6 +94,7 @@ async def plan_project(goal_id: str, objective: str) -> dict[str, Any]:
         tools=[PLAN_TOOL], tool_choice={"type": "tool", "name": "submit_plan"},
         messages=[{"role": "user", "content": objective}],
     )
+    costs.record("planner", PLANNER_MODEL, resp.usage)
     plan = next((b.input for b in resp.content if b.type == "tool_use"), {}) or {}
     steps = (plan.get("steps") or [])[:6]
     if not steps:
@@ -161,6 +162,7 @@ async def _run_step(item: dict[str, Any]) -> None:
             model=EXECUTOR_MODEL, max_tokens=1500, system=system,
             tools=TOOLS + [WEB_SEARCH_TOOL], messages=messages,
         )
+        costs.record("executor", EXECUTOR_MODEL, resp.usage)
         texts = [b.text for b in resp.content if b.type == "text"]
         if texts:
             outcome = texts[-1]
