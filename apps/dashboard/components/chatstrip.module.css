@@ -55,23 +55,6 @@
   border-bottom-left-radius: 4px;
 }
 
-.voiceToggle {
-  position: sticky;
-  top: 0;
-  align-self: flex-end;
-  z-index: 2;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 13px;
-  padding: 0 2px;
-  opacity: 0.75;
-}
-
-.voiceToggle:hover {
-  opacity: 1;
-}
-
 .tag {
   display: block;
   font-size: 9px;

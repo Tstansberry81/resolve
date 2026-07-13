@@ -66,6 +66,13 @@ function stopSpeaking(): void {
   if (typeof window !== "undefined") window.speechSynthesis?.cancel();
 }
 
+// Hard-stop any speech in progress (both lanes) and clear the speaking flag.
+// Called when voice mode is turned off so it goes quiet immediately.
+export function cancelSpeech(): void {
+  stopSpeaking();
+  setSpeaking(false);
+}
+
 // Browser Web Speech fallback (used when ElevenLabs isn't configured or fails).
 function browserSpeak(clean: string, done: () => void): void {
   const synth = typeof window !== "undefined" ? window.speechSynthesis : null;

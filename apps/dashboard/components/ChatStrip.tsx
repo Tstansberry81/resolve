@@ -1,13 +1,13 @@
 "use client";
 
-// Conversation surface: renders the command/reply exchange as chat bubbles so
-// Sonnet's answers (and her clarifying questions) are impossible to miss.
-// Pure view over the event feed — works identically in mock and live mode.
+// Conversation surface: renders the command/reply exchange as chat bubbles.
+// Pure VIEW over the event feed — no audio. All speech is handled by
+// CommandCore's voice conversation loop (wake word). Collapses entirely while
+// the wake word is armed for a clean voice-only interface.
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useEngine } from "@/lib/useEngine";
 import type { AgentEvent } from "@/lib/types";
-import { speak } from "@/lib/speech";
 import { getVoice, subscribeVoice } from "@/lib/voice";
 import styles from "./chatstrip.module.css";
 
@@ -37,50 +37,17 @@ export function ChatStrip() {
   const state = useEngine();
   const bubbles = toBubbles(state.events);
   const endRef = useRef<HTMLDivElement>(null);
-  const spokenRef = useRef<number>(0);
   const voice = useSyncExternalStore(subscribeVoice, getVoice, () => EMPTY_VOICE);
-  const [voiceOn, setVoiceOn] = useState(false);
-
-  useEffect(() => {
-    setVoiceOn(localStorage.getItem("resolve_voice") === "on");
-  }, []);
-
-  // Speak replies for the manual 🔊 toggle only. In voice conversation mode
-  // (wake word), CommandCore's turn-based loop speaks the reply itself so it
-  // controls the mic hand-back — ChatStrip must stay quiet to avoid double audio.
-  const speakOn = voiceOn && !voice.active;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    const last = bubbles[bubbles.length - 1];
-    if (speakOn && last && last.who === "sonnet" && last.id > spokenRef.current) {
-      spokenRef.current = last.id;
-      speak(last.text);
-    }
-  }, [bubbles, speakOn]);
+  }, [bubbles]);
 
-  const toggleVoice = () => {
-    const next = !voiceOn;
-    setVoiceOn(next);
-    localStorage.setItem("resolve_voice", next ? "on" : "off");
-    if (!next) window.speechSynthesis?.cancel();
-    else speak("Voice on.");
-  };
-
-  // While the wake word is armed, collapse the subtitles for a clean voice-only
-  // interface. The reply-speaking effect above still runs (component stays
-  // mounted), so voice output is unaffected.
+  // Collapse subtitles entirely while the wake word is armed (voice-only mode).
   if (bubbles.length === 0 || voice.wakeOn) return null;
 
   return (
     <div className={styles.strip} aria-label="Conversation">
-      <button
-        className={styles.voiceToggle}
-        onClick={toggleVoice}
-        title={voiceOn ? "Sonnet speaks replies — tap to mute" : "Tap to have Sonnet speak replies"}
-      >
-        {voiceOn ? "🔊" : "🔇"}
-      </button>
       {bubbles.map((b) => (
         <div key={b.id} className={b.who === "you" ? styles.rowYou : styles.rowSonnet}>
           <div className={b.who === "you" ? styles.bubbleYou : styles.bubbleSonnet}>

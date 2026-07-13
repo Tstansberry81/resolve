@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine, useEngine } from "@/lib/useEngine";
-import { makeRecognition, preloadVoices, speak, type SpeechRecognitionLike } from "@/lib/speech";
+import {
+  cancelSpeech,
+  makeRecognition,
+  preloadVoices,
+  speak,
+  type SpeechRecognitionLike,
+} from "@/lib/speech";
 import {
   getVoice,
   isSleepPhrase,
@@ -190,6 +196,7 @@ export function CommandCore() {
       phaseRef.current = "off";
       if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
       stopConvMic();
+      cancelSpeech(); // go quiet the instant voice mode turns off
       setListening(false);
       return;
     }
