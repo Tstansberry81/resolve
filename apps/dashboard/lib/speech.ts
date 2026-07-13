@@ -52,9 +52,14 @@ export function pickVoice(): SpeechSynthesisVoice | null {
 }
 
 let currentAudio: HTMLAudioElement | null = null;
+// Bumped every time speech is (re)started or cancelled; late callbacks from a
+// superseded/interrupted utterance check their token and no-op, so a barge-in
+// can't have the old reply's onend reopen the mic or flip the speaking flag.
+let speakSeq = 0;
 
 // Stop whatever's currently talking, in either lane.
 function stopSpeaking(): void {
+  speakSeq++;
   if (currentAudio) {
     try {
       currentAudio.pause();
@@ -105,6 +110,7 @@ export function speak(text: string, opts: { onend?: () => void } = {}): void {
   }
 
   stopSpeaking();
+  const mySeq = speakSeq;
   setSpeaking(true);
 
   let finished = false;
@@ -113,7 +119,9 @@ export function speak(text: string, opts: { onend?: () => void } = {}): void {
   const maxMs = 4000 + clean.length * 90;
   const watchdog = window.setTimeout(() => finish(), maxMs);
   function finish() {
-    if (finished) return;
+    // superseded by a newer speak()/cancelSpeech()? then do nothing — the new
+    // turn owns the speaking flag and the mic hand-back.
+    if (finished || mySeq !== speakSeq) return;
     finished = true;
     window.clearTimeout(watchdog);
     setSpeaking(false);

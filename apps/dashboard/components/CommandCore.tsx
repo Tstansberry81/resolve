@@ -102,6 +102,8 @@ export function CommandCore() {
   const phaseRef = useRef<"off" | "listening" | "awaiting" | "speaking">("off");
   const pendingIdRef = useRef<number>(-1);
   const awaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bargeRef = useRef<SpeechRecognitionLike | null>(null);
+  const spokenTextRef = useRef<string>("");
   const eventsRef = useRef(events);
   eventsRef.current = events;
 
@@ -125,6 +127,63 @@ export function CommandCore() {
       }
     }
   };
+
+  // Is `heard` just our own TTS leaking back through the mic? If most of its
+  // words are in what we're currently saying, it's echo — ignore it.
+  const isEcho = (heard: string): boolean => {
+    const norm = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+    const h = norm(heard);
+    if (h.length < 2) return true; // too short to trust as a real interruption
+    const said = new Set(norm(spokenTextRef.current));
+    const overlap = h.filter((w) => said.has(w)).length / h.length;
+    return overlap > 0.5;
+  };
+
+  const stopBargeIn = () => {
+    const r = bargeRef.current;
+    bargeRef.current = null;
+    if (r) {
+      r.onresult = r.onend = r.onerror = null;
+      try {
+        r.abort();
+      } catch {
+        /* noop */
+      }
+    }
+  };
+
+  // Listen WHILE RESOLVE is speaking so Trav can cut it off. The mic hears the
+  // TTS too, so we filter that echo; a genuine interruption cancels the reply
+  // and is handled as the next turn. Best-effort — works best with headphones.
+  function startBargeIn() {
+    if (!activeRef.current || phaseRef.current !== "speaking") return;
+    const rec = makeRecognition();
+    if (!rec) return;
+    bargeRef.current = rec;
+    rec.lang = "en-US";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (e) => {
+      const last = e.results[e.results.length - 1];
+      const heard = (last?.[0]?.transcript ?? "").trim();
+      if (!heard || isEcho(heard)) return;
+      stopBargeIn();
+      cancelSpeech(); // cut the reply off mid-sentence
+      onHeard(heard); // treat the interruption as the next command
+    };
+    rec.onend = () => {
+      if (phaseRef.current === "speaking" && activeRef.current) {
+        window.setTimeout(startBargeIn, 200); // stay armed until the reply ends
+      }
+    };
+    rec.onerror = () => {};
+    try {
+      rec.start();
+    } catch {
+      /* barge-in is best-effort */
+    }
+  }
 
   const onHeard = (heard: string) => {
     setListening(false);
@@ -196,6 +255,7 @@ export function CommandCore() {
       phaseRef.current = "off";
       if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
       stopConvMic();
+      stopBargeIn();
       cancelSpeech(); // go quiet the instant voice mode turns off
       setListening(false);
       return;
@@ -207,6 +267,7 @@ export function CommandCore() {
       clearTimeout(t);
       if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
       stopConvMic();
+      stopBargeIn();
       setListening(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -224,16 +285,19 @@ export function CommandCore() {
     if (!reply) return;
     if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
     phaseRef.current = "speaking";
+    spokenTextRef.current = reply.text;
     speak(reply.text, {
       onend: () => {
-        if (activeRef.current) {
+        stopBargeIn();
+        if (activeRef.current && phaseRef.current === "speaking") {
           phaseRef.current = "listening";
           openMic();
-        } else {
+        } else if (!activeRef.current) {
           phaseRef.current = "off";
         }
       },
     });
+    startBargeIn(); // let Trav talk over it
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 
