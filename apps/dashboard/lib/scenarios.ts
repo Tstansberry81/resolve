@@ -10,7 +10,7 @@ import type {
 
 // Scripted, deterministic scenarios. Flow per docs/DIRECTION.md:
 // every input goes through the assistant (Sonnet); she handles menial work
-// herself and delegates planning to Sol, heavy agentic work to the Executor,
+// herself and delegates planning to Planner, heavy agentic work to the Executor,
 // and code to the Coder + Reviewer. Luna routes/classifies up front.
 
 export type Action =
@@ -98,12 +98,11 @@ function briefing(id = "g-briefing"): Scenario {
     },
     steps: [
       { at: 0, action: orb("thinking", "Sonnet is sizing up the morning") },
-      { at: 0.2, action: nodes("assistant", "luna") },
+      { at: 0.2, action: nodes("assistant") },
       {
         at: 0.4,
-        action: ev(id, "luna", "route.classified", "Routed: menial · assistant handles it directly", {
-          edge: { from: "assistant", to: "luna" },
-          detail: "gpt-5.6-luna · no plan needed, read-only",
+        action: ev(id, "assistant", "route.classified", "Menial · assistant handles it directly", {
+          detail: "no plan needed, read-only",
         }),
       },
       { at: 1.5, action: goal(id, { status: "active", progress: 0.1, nextAction: "Read calendar" }) },
@@ -171,7 +170,7 @@ function briefing(id = "g-briefing"): Scenario {
   };
 }
 
-// ── scenario 2: study guide — large project, Sol plans, Executor works ────
+// ── scenario 2: study guide — large project, Planner plans, Executor works ────
 
 function studyGuide(id = "g-econ"): Scenario {
   return {
@@ -185,38 +184,38 @@ function studyGuide(id = "g-econ"): Scenario {
       budgetUsd: 3,
       spentUsd: 0,
       deadline: "Fri 18:00",
-      nextAction: "Hand to Sol",
+      nextAction: "Hand to Planner",
       blocker: null,
     },
     steps: [
-      { at: 0, action: orb("thinking", "Sonnet is briefing Sol on the project") },
-      { at: 0.1, action: nodes("assistant", "sol") },
+      { at: 0, action: orb("thinking", "Sonnet is briefing Planner on the project") },
+      { at: 0.1, action: nodes("assistant", "planner") },
       {
         at: 0.5,
-        action: ev(id, "assistant", "delegate.plan", "Large project — handed to Sol for planning", {
-          edge: { from: "assistant", to: "sol" },
+        action: ev(id, "assistant", "delegate.plan", "Large project — handed to Planner for planning", {
+          edge: { from: "assistant", to: "planner" },
         }),
       },
       {
         at: 1.2,
-        action: ev(id, "sol", "vault.read", "Sol pulled course + goal context from your vault", {
+        action: ev(id, "planner", "vault.read", "Planner pulled course + goal context from your vault", {
           detail: "second brain: wiki/index, ECON pages, prior study patterns",
-          edge: { from: "sol", to: "vault" },
+          edge: { from: "planner", to: "vault" },
         }),
       },
       {
         at: 2,
-        action: ev(id, "sol", "plan.created", "Sol: 7-task DAG with citation gate", {
+        action: ev(id, "planner", "plan.created", "Planner: 7-task DAG with citation gate", {
           detail: "collect → extract → outline → synthesize → cite-check → quiz → coverage eval",
         }),
       },
       { at: 2.2, action: goal(id, { status: "active", progress: 0.08, nextAction: "Executor collects sources" }) },
       { at: 2.3, action: orb("executing", "Executor is collecting course sources") },
-      { at: 2.4, action: nodes("sol", "executor", "canvas") },
+      { at: 2.4, action: nodes("planner", "executor", "canvas") },
       {
         at: 2.6,
-        action: ev(id, "sol", "delegate.execute", "Plan dispatched to the Executor", {
-          edge: { from: "sol", to: "executor" },
+        action: ev(id, "planner", "delegate.execute", "Plan dispatched to the Executor", {
+          edge: { from: "planner", to: "executor" },
         }),
       },
       {
@@ -298,7 +297,7 @@ function studyGuide(id = "g-econ"): Scenario {
   };
 }
 
-// ── scenario 3: bug fix — Sol plans, Coder implements, Reviewer gates ─────
+// ── scenario 3: bug fix — Planner plans, Coder implements, Reviewer gates ─────
 
 function bugfix(id = "g-bugfix"): Scenario {
   return {
@@ -312,25 +311,25 @@ function bugfix(id = "g-bugfix"): Scenario {
       budgetUsd: 5,
       spentUsd: 0,
       deadline: null,
-      nextAction: "Hand to Sol",
+      nextAction: "Hand to Planner",
       blocker: null,
     },
     steps: [
-      { at: 0, action: orb("thinking", "Sonnet is scoping the bug with Sol") },
-      { at: 0.1, action: nodes("assistant", "sol") },
+      { at: 0, action: orb("thinking", "Sonnet is scoping the bug with Planner") },
+      { at: 0.1, action: nodes("assistant", "planner") },
       {
         at: 0.3,
-        action: ev(id, "assistant", "delegate.plan", "Coding goal — Sol architects the fix", {
-          edge: { from: "assistant", to: "sol" },
+        action: ev(id, "assistant", "delegate.plan", "Coding goal — Planner architects the fix", {
+          edge: { from: "assistant", to: "planner" },
         }),
       },
       {
         at: 1.4,
-        action: ev(id, "sol", "plan.created", "Sol: reproduce → fix → tests → independent review → draft PR", {
+        action: ev(id, "planner", "plan.created", "Planner: reproduce → fix → tests → independent review → draft PR", {
           detail: "merge explicitly withheld pending your approval",
         }),
       },
-      { at: 1.6, action: nodes("sol", "coder", "github") },
+      { at: 1.6, action: nodes("planner", "coder", "github") },
       {
         at: 1.8,
         action: ev(id, "coder", "tool.call", "github.checkout — isolated worktree created", {
@@ -552,12 +551,10 @@ export function makeCommandScenario(text: string, id: string): Scenario {
     },
     steps: [
       { at: 0, action: orb("listening", "Sonnet heard you — parsing the request") },
-      { at: 0.7, action: nodes("assistant", "luna") },
+      { at: 0.7, action: nodes("assistant") },
       {
         at: 0.9,
-        action: ev(id, "luna", "route.classified", "Routed: menial · assistant handles it directly", {
-          edge: { from: "assistant", to: "luna" },
-        }),
+        action: ev(id, "assistant", "route.classified", "Menial · assistant handles it directly"),
       },
       { at: 1.4, action: orb("thinking", "Sonnet is working your request") },
       {

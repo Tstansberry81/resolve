@@ -57,10 +57,7 @@ export function VitalsDropdown() {
             {AGENTS.map((ag) => {
               const busy = activeNodes.includes(ag.id);
               const lane = vitals.models.find(
-                (m) =>
-                  m.role === ag.id ||
-                  (ag.id === "luna" && m.role === "router") ||
-                  (ag.id === "sol" && m.role === "planner"),
+                (m) => m.role === ag.id || (ag.id === "planner" && m.role === "planner"),
               );
               return (
                 <div key={ag.id} className="agent-row" data-busy={busy}>

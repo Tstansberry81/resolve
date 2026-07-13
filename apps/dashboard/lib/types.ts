@@ -4,8 +4,7 @@
 
 export type AgentId =
   | "assistant"
-  | "luna"
-  | "sol"
+  | "planner"
   | "executor"
   | "coder"
   | "reviewer"

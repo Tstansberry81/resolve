@@ -6,13 +6,13 @@ import { AGENTS, AGENT_META, CONNECTORS, HIERARCHY_EDGES } from "@/lib/roster";
 import type { NodeId } from "@/lib/types";
 
 // The real delegation tree, not decoration. Layout mirrors docs/DIRECTION.md:
-// you (the orb above) → assistant → [luna · sol · executor · coder · reviewer]
+// you (the orb above) → assistant → [planner · executor · coder · reviewer]
 // → connectors. Static edges show the hierarchy; they only light up when the
 // engine emits an actual handoff, and pulses travel in the delegation
 // direction. An input beam drops from the orb into the assistant while she's
 // listening/working.
 
-const AGENT_ROW: NodeId[] = ["luna", "sol", "executor", "coder", "reviewer"];
+const AGENT_ROW: NodeId[] = ["planner", "executor", "coder", "reviewer"];
 
 export function Constellation() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

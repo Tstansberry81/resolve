@@ -15,7 +15,7 @@ TOOL_POLICY = {
     "send_email": ("email.send", "gmail"),
     "vault_log": ("vault.append", "vault"),
     "vault_read": ("vault.read", "vault"),
-    "plan_project": ("plan.project", "sol"),
+    "plan_project": ("plan.project", "planner"),
     "delete_task": ("notion.page.archive", "notion"),
     "delete_calendar_event": ("calendar.delete", "calendar"),
     "ask_local": ("local.ask", "web"),
@@ -142,7 +142,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "plan_project",
-        "description": "Hand a complex multi-step goal to Sol (planner) and the Opus executor. Call ONCE with a clear objective; steps run in the background and stream into the event feed.",
+        "description": "Hand a complex multi-step goal to the Planner (Opus 4.8) and the Opus executor. Call ONCE with a clear objective; steps run in the background (the executor can research the web) and stream into the event feed.",
         "input_schema": {
             "type": "object",
             "properties": {"objective": {"type": "string", "description": "Full objective with all needed details"}},
@@ -164,7 +164,8 @@ Rules:
   then call the delete tool and tell him it's waiting on his banner.
 - Be brief and warm. One short paragraph max in your final reply.
 - For complex multi-step requests (several distinct actions, research projects, bulk work),
-  call plan_project ONCE with the full objective. Sol plans it, the Opus executor runs the
-  steps in the background. Tell the user the plan is queued and list the steps."""
+  call plan_project ONCE with the full objective. The Planner (Opus 4.8) plans it, the Opus
+  executor runs the steps in the background (and can research the web). Tell the user the plan
+  is queued and list the steps."""
 
 

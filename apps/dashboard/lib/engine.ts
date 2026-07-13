@@ -44,8 +44,7 @@ const INITIAL_VITALS: Vitals = {
   ],
   models: [
     { role: "assistant", model: "claude-sonnet-4-6", p50Ms: 1400, costTodayUsd: 0.31 },
-    { role: "router", model: "gpt-5.6-luna", p50Ms: 320, costTodayUsd: 0.04 },
-    { role: "planner", model: "gpt-5.6-sol", p50Ms: 3800, costTodayUsd: 0.22 },
+    { role: "planner", model: "claude-opus-4-8", p50Ms: 3800, costTodayUsd: 0.22 },
     { role: "executor", model: "claude-opus-4-8", p50Ms: 4600, costTodayUsd: 0.29 },
     { role: "coder", model: "claude-opus-4-8", p50Ms: 5200, costTodayUsd: 0.47 },
     { role: "reviewer", model: "claude-opus-4-8", p50Ms: 4100, costTodayUsd: 0.18 },

@@ -265,7 +265,7 @@ async def _loop(goal_id: str, text: str) -> None:
                     if not executor.available():
                         results.append(
                             {"type": "tool_result", "tool_use_id": tu.id,
-                             "content": "Planner unavailable: OPENAI_API_KEY not configured.",
+                             "content": "Planner unavailable: ANTHROPIC_API_KEY not configured.",
                              "is_error": True}
                         )
                         continue

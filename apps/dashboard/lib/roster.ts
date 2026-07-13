@@ -20,16 +20,9 @@ export const AGENTS: AgentMeta[] = [
     color: "#3ee0ff",
   },
   {
-    id: "luna",
-    label: "Luna",
-    model: "gpt-5.6-luna",
-    role: "router · classification",
-    color: "#97a5bd",
-  },
-  {
-    id: "sol",
-    label: "Sol",
-    model: "gpt-5.6-sol",
+    id: "planner",
+    label: "Planner",
+    model: "claude-opus-4-8",
     role: "planner · the mastermind",
     color: "#ffb01f",
   },
@@ -72,10 +65,9 @@ export const CONNECTORS: { id: ConnectorId; label: string }[] = [
 
 /** static delegation tree drawn faintly in the constellation */
 export const HIERARCHY_EDGES: Array<[AgentId, AgentId]> = [
-  ["assistant", "luna"],
-  ["assistant", "sol"],
+  ["assistant", "planner"],
   ["assistant", "executor"],
   ["assistant", "coder"],
   ["coder", "reviewer"],
-  ["sol", "executor"],
+  ["planner", "executor"],
 ];
