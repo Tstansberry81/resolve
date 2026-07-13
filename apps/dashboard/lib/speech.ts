@@ -51,15 +51,26 @@ export function pickVoice(): SpeechSynthesisVoice | null {
   );
 }
 
-export function speak(text: string, opts: { onend?: () => void } = {}): void {
-  if (typeof window === "undefined" || !window.speechSynthesis) {
-    opts.onend?.();
-    return;
+let currentAudio: HTMLAudioElement | null = null;
+
+// Stop whatever's currently talking, in either lane.
+function stopSpeaking(): void {
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+    } catch {
+      /* noop */
+    }
+    currentAudio = null;
   }
-  const synth = window.speechSynthesis;
-  const clean = text.replace(/[*_#`]/g, "").slice(0, 600).trim();
-  if (!clean) {
-    opts.onend?.();
+  if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+}
+
+// Browser Web Speech fallback (used when ElevenLabs isn't configured or fails).
+function browserSpeak(clean: string, done: () => void): void {
+  const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
+  if (!synth) {
+    done();
     return;
   }
   const u = new SpeechSynthesisUtterance(clean);
@@ -67,23 +78,73 @@ export function speak(text: string, opts: { onend?: () => void } = {}): void {
   if (voice) u.voice = voice;
   u.lang = "en-GB";
   u.rate = 1.02;
-  let finished = false;
-  const done = () => {
-    if (finished) return;
-    finished = true;
-    setSpeaking(false);
-    opts.onend?.();
-  };
   u.onend = done;
   u.onerror = done;
-  synth.cancel(); // drop anything queued/stuck
-  setSpeaking(true);
   // Chrome quirk: the queue can be left "paused" after cancel(), silently
   // dropping the next utterance. resume() clears that state before speaking.
   synth.resume();
   synth.speak(u);
-  // Watchdog: if the utterance is silently dropped (onend never fires), don't
-  // leave `speaking` stuck true — that would deadlock the conversation mic.
-  const maxMs = 2500 + clean.length * 90;
-  setTimeout(done, maxMs);
+}
+
+export function speak(text: string, opts: { onend?: () => void } = {}): void {
+  if (typeof window === "undefined") {
+    opts.onend?.();
+    return;
+  }
+  const clean = text.replace(/[*_#`]/g, "").slice(0, 600).trim();
+  if (!clean) {
+    opts.onend?.();
+    return;
+  }
+
+  stopSpeaking();
+  setSpeaking(true);
+
+  let finished = false;
+  // Watchdog: if a completion event is ever missed, don't leave `speaking`
+  // stuck true — that would deadlock the conversation mic.
+  const maxMs = 4000 + clean.length * 90;
+  const watchdog = window.setTimeout(() => finish(), maxMs);
+  function finish() {
+    if (finished) return;
+    finished = true;
+    window.clearTimeout(watchdog);
+    setSpeaking(false);
+    opts.onend?.();
+  }
+
+  // Prefer ElevenLabs (real Jarvis voice, proxied server-side); fall back to the
+  // browser voice on any failure or when no key is configured (501).
+  void (async () => {
+    try {
+      const r = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: clean }),
+      });
+      if (r.ok) {
+        const blob = await r.blob();
+        if (blob.size > 0) {
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          currentAudio = audio;
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            if (currentAudio === audio) currentAudio = null;
+            finish();
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(url);
+            if (currentAudio === audio) currentAudio = null;
+            browserSpeak(clean, finish);
+          };
+          await audio.play();
+          return;
+        }
+      }
+      browserSpeak(clean, finish); // 501/empty → browser voice
+    } catch {
+      browserSpeak(clean, finish);
+    }
+  })();
 }
