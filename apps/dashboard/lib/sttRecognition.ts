@@ -20,6 +20,90 @@ const MAX_UTTER_MS = 15000; // hard cap on one utterance
 const NO_SPEECH_MS = 8000; // give up waiting for speech onset (one-shot)
 const POLL_MS = 100;
 
+// mic constraints: echo cancellation is what makes talk-over possible — it
+// subtracts RESOLVE's own TTS (played through the speakers) from the mic signal
+// so the barge-in detector mostly sees your voice, not the reply.
+const MIC_CONSTRAINTS: MediaStreamConstraints = {
+  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+};
+
+function makeAudioContext(): AudioContext {
+  const AC =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  return new AC();
+}
+
+function rmsOf(analyser: AnalyserNode): number {
+  const buf = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const v = (buf[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / buf.length);
+}
+
+// Barge-in: while RESOLVE is speaking, listen ONLY for your voice energy (no
+// transcription, no API calls). Once you talk over it for BARGE_SUSTAIN_MS, fire
+// onInterrupt so the caller can cut the reply and capture your command. Returns
+// a teardown you call when the reply ends. Best-effort; works best with the AEC
+// above (or headphones).
+const BARGE_ON = 0.09; // above residual echo, at speaking-voice level
+const BARGE_SUSTAIN_MS = 320;
+
+export function listenForInterrupt(onInterrupt: () => void): () => void {
+  let stream: MediaStream | null = null;
+  let audioCtx: AudioContext | null = null;
+  let poll: ReturnType<typeof setInterval> | null = null;
+  let disposed = false;
+  let loudStart = 0;
+
+  const cleanup = () => {
+    if (disposed) return;
+    disposed = true;
+    if (poll) clearInterval(poll);
+    poll = null;
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+    if (audioCtx) audioCtx.close().catch(() => {});
+    audioCtx = null;
+  };
+
+  (async () => {
+    let s: MediaStream;
+    try {
+      s = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+    } catch {
+      return;
+    }
+    if (disposed) {
+      s.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    stream = s;
+    audioCtx = makeAudioContext();
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    poll = setInterval(() => {
+      const now = Date.now();
+      if (rmsOf(analyser) > BARGE_ON) {
+        if (!loudStart) loudStart = now;
+        else if (now - loudStart > BARGE_SUSTAIN_MS) {
+          cleanup();
+          onInterrupt();
+        }
+      } else {
+        loudStart = 0;
+      }
+    }, POLL_MS);
+  })();
+
+  return cleanup;
+}
+
 function pickMime(): string {
   const cands = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
   for (const m of cands) {
@@ -67,29 +151,20 @@ export function makeSttRecognition(): SpeechRecognitionLike {
   };
 
   function rms(): number {
-    if (!analyser) return 0;
-    const buf = new Uint8Array(analyser.fftSize);
-    analyser.getByteTimeDomainData(buf);
-    let sum = 0;
-    for (let i = 0; i < buf.length; i++) {
-      const v = (buf[i] - 128) / 128;
-      sum += v * v;
-    }
-    return Math.sqrt(sum / buf.length);
+    return analyser ? rmsOf(analyser) : 0;
   }
 
   async function begin() {
     if (disposed) return;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
     } catch {
       rec.onerror?.();
       rec.onend?.();
       return;
     }
     mime = pickMime();
-    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    audioCtx = new AC();
+    audioCtx = makeAudioContext();
     const src = audioCtx.createMediaStreamSource(stream);
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;

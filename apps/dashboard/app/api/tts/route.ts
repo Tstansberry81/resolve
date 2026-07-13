@@ -14,6 +14,9 @@ export const runtime = "nodejs";
 
 const DEFAULT_VOICE = "onwK4e9ZLuTAKqWW03F9"; // Daniel — deep British male, Jarvis-ish
 const DEFAULT_MODEL = "eleven_turbo_v2_5";
+// ElevenLabs speaking rate (voice_settings.speed). 1.0 = normal; range 0.7–1.2.
+// Bumped a touch so RESOLVE talks faster. Override with ELEVENLABS_SPEED.
+const SPEED = Math.min(1.2, Math.max(0.7, Number(process.env.ELEVENLABS_SPEED || "1.14")));
 
 export async function POST(req: Request) {
   const key = process.env.ELEVENLABS_API_KEY;
@@ -52,6 +55,7 @@ export async function POST(req: Request) {
             similarity_boost: 0.8,
             style: 0.0,
             use_speaker_boost: true,
+            speed: SPEED,
           },
         }),
       },

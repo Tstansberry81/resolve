@@ -120,7 +120,7 @@ function browserSpeak(clean: string, done: () => void): void {
   const voice = pickVoice();
   if (voice) u.voice = voice;
   u.lang = "en-GB";
-  u.rate = 1.02;
+  u.rate = 1.14;
   u.onend = done;
   u.onerror = done;
   // Chrome quirk: the queue can be left "paused" after cancel(), silently

@@ -17,6 +17,7 @@ import {
   setActive,
   subscribeVoice,
 } from "@/lib/voice";
+import { listenForInterrupt } from "@/lib/sttRecognition";
 
 const STATE_LABEL: Record<string, string> = {
   idle: "STANDING BY",
@@ -153,7 +154,28 @@ export function CommandCore() {
         /* noop */
       }
     }
+    stopSttBargeIn();
   };
+
+  // STT barge-in: energy-only interrupt detection (no transcription of our own
+  // TTS). When Trav talks over the reply, cut it and capture his command.
+  const sttBargeStopRef = useRef<(() => void) | null>(null);
+  const stopSttBargeIn = () => {
+    const stop = sttBargeStopRef.current;
+    sttBargeStopRef.current = null;
+    stop?.();
+  };
+  function startSttBargeIn() {
+    if (!activeRef.current || phaseRef.current !== "speaking") return;
+    sttBargeStopRef.current = listenForInterrupt(() => {
+      sttBargeStopRef.current = null;
+      cancelSpeech(); // cut the reply the instant he talks over it
+      if (activeRef.current) {
+        phaseRef.current = "listening";
+        openMic();
+      }
+    });
+  }
 
   // Listen WHILE RESOLVE is speaking so Trav can cut it off. The mic hears the
   // TTS too, so we filter that echo; a genuine interruption cancels the reply
@@ -299,10 +321,13 @@ export function CommandCore() {
         }
       },
     });
-    // talk-over only where the recognizer can run concurrently: not on iOS
-    // (audio session conflict), and not with server-STT (it would transcribe
-    // our own TTS, wasting calls). Desktop Web-Speech only.
-    if (!isMobile() && !usesSttEngine()) startBargeIn();
+    // talk-over (desktop only — iOS mutes replies when the mic is live). Under
+    // server-STT we use energy-only interrupt detection; browsers use the Web
+    // Speech recognizer with echo filtering.
+    if (!isMobile()) {
+      if (usesSttEngine()) startSttBargeIn();
+      else startBargeIn();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 
