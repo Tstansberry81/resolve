@@ -51,13 +51,50 @@ def append_log(title: str, lines: list[str]) -> dict:
     return {"committed": True, "path": LOG_PATH, "title": title}
 
 
-def read_file(path: str) -> dict:
+def read_file(path: str, limit: int = 6000) -> dict:
     """Read one vault file (truncated) so agents can pull second-brain context."""
     url = f"https://api.github.com/repos/{VAULT_REPO}/contents/{path}"
     r = requests.get(url, headers=_headers(), timeout=20)
     r.raise_for_status()
     text = base64.b64decode(r.json().get("content", "")).decode("utf-8", "replace")
-    return {"path": path, "content": text[:6000]}
+    return {"path": path, "content": text[:limit]}
+
+
+def write_file(path: str, content: str, message: str = "") -> dict:
+    """Create or update a vault file (create blob → PUT with sha if it exists).
+
+    Guards the CLAUDE.md schema: `raw/` is IMMUTABLE (source of truth) and
+    CLAUDE.md itself is off-limits to automated writes. Everything else in
+    `wiki/` and `output/` is fair game — it's all git-versioned/reversible."""
+    norm = path.strip().lstrip("/")
+    low = norm.lower()
+    if low.startswith("raw/") or low == "raw" or low == "claude.md":
+        raise ValueError(f"refusing to write to protected path: {path} (raw/ and CLAUDE.md are read-only)")
+    url = f"https://api.github.com/repos/{VAULT_REPO}/contents/{norm}"
+    sha = None
+    existing = requests.get(url, headers=_headers(), timeout=20)
+    if existing.status_code == 200:
+        sha = existing.json().get("sha")
+    body = {
+        "message": message or f"agent: write {norm}",
+        "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+    }
+    if sha:
+        body["sha"] = sha
+    put = requests.put(url, headers=_headers(), json=body, timeout=20)
+    put.raise_for_status()
+    return {"committed": True, "path": norm, "updated": sha is not None}
+
+
+def list_tree(prefix: str = "wiki/") -> dict:
+    """List vault file paths under a prefix so the ingest can see current structure."""
+    url = f"https://api.github.com/repos/{VAULT_REPO}/git/trees/main?recursive=1"
+    r = requests.get(url, headers=_headers(), timeout=20)
+    r.raise_for_status()
+    p = prefix.lower()
+    paths = [t["path"] for t in r.json().get("tree", [])
+             if t.get("type") == "blob" and t["path"].lower().startswith(p)]
+    return {"prefix": prefix, "paths": paths[:200]}
 
 
 def search_files(query: str) -> dict:

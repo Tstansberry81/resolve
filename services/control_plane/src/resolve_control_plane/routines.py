@@ -17,6 +17,7 @@ from . import bus
 log = logging.getLogger("resolve.routines")
 
 _last_brief_date: str | None = None
+_last_ingest_date: str | None = None
 
 BRIEF_PROMPT = (
     "Morning brief: check my calendar for the next 2 days, my open Notion tasks,"
@@ -41,8 +42,15 @@ async def scheduler_loop() -> None:
     while True:
         try:
             now = datetime.now(ZoneInfo("America/New_York"))
+            today = now.strftime("%Y-%m-%d")
+            # midnight: ingest the prior day's activity into the vault (once/day)
+            global _last_ingest_date
+            if now.hour == 0 and now.minute < 10 and _last_ingest_date != today:
+                _last_ingest_date = today
+                from . import ingest
+                await ingest.run_daily_ingest()
             if (now.hour == 7 and now.minute < 10
-                    and _last_brief_date != now.strftime("%Y-%m-%d")):
+                    and _last_brief_date != today):
                 await run_morning_brief()
         except Exception:
             log.exception("routine tick failed")

@@ -249,3 +249,13 @@ async def morning_brief() -> dict:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
     goal_id = await routines.run_morning_brief()
     return {"ok": True, "goalId": goal_id}
+
+
+@app.post("/v1/routines/daily_ingest", dependencies=[Depends(auth)])
+async def daily_ingest(date: str | None = None) -> dict:
+    """Manually trigger the vault ingest (defaults to yesterday) — use this to
+    validate the first run before trusting the midnight schedule."""
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+    from . import ingest
+    return await ingest.run_daily_ingest(date)
