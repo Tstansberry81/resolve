@@ -3,7 +3,7 @@
 // Separate finance page — checking, savings, and checking P/L, with a net-worth
 // line chart. Powered by SimpleFIN (read-only). Behind the same gate as the app.
 
-import { useCallback, useEffect, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Starfield } from "@/components/Starfield";
 import styles from "./finance.module.css";
@@ -39,6 +39,7 @@ const usd2 = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 function NetWorthChart({ series }: { series: { date: string; value: number }[] }) {
+  const [hover, setHover] = useState<number | null>(null);
   if (series.length < 2) {
     return <div className={styles.muted}>Net-worth trend appears once there are a few days of history.</div>;
   }
@@ -56,21 +57,45 @@ function NetWorthChart({ series }: { series: { date: string; value: number }[] }
   const up = series[series.length - 1].value >= series[0].value;
   const stroke = up ? "var(--green)" : "var(--red, #ff6b6b)";
 
+  const onMove = (e: MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const frac = (e.clientX - rect.left) / rect.width;
+    const i = Math.max(0, Math.min(series.length - 1, Math.round(frac * (series.length - 1))));
+    setHover(i);
+  };
+
+  const hp = hover != null ? series[hover] : null;
+  const hxPct = hover != null ? (x(hover) / W) * 100 : 0;
+  const hyPct = hp ? (y(hp.value) / H) * 100 : 0;
+  const tipLeft = Math.min(92, Math.max(8, hxPct));
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" role="img">
-      <defs>
-        <linearGradient id="nwfill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
-          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={area} fill="url(#nwfill)" />
-      <path d={line} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" />
-      <text x={pad.l} y={H - 4} className={styles.axis}>{series[0].date.slice(2)}</text>
-      <text x={W - pad.r} y={H - 4} textAnchor="end" className={styles.axis}>
-        {series[series.length - 1].date.slice(2)}
-      </text>
-    </svg>
+    <div className={styles.chartWrap} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" role="img">
+        <defs>
+          <linearGradient id="nwfill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={area} fill="url(#nwfill)" />
+        <path d={line} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" />
+        <text x={pad.l} y={H - 4} className={styles.axis}>{series[0].date.slice(2)}</text>
+        <text x={W - pad.r} y={H - 4} textAnchor="end" className={styles.axis}>
+          {series[series.length - 1].date.slice(2)}
+        </text>
+      </svg>
+      {hp && (
+        <>
+          <div className={styles.guide} style={{ left: `${hxPct}%` }} />
+          <div className={styles.dot} style={{ left: `${hxPct}%`, top: `${hyPct}%`, background: stroke }} />
+          <div className={styles.tip} style={{ left: `${tipLeft}%` }}>
+            <div className={styles.tipVal}>{usd2(hp.value)}</div>
+            <div className={styles.tipDate}>{hp.date}</div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
