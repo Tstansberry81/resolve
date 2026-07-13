@@ -1,0 +1,14 @@
+{
+  "appId": "com.tstansberry.resolve",
+  "appName": "RESOLVE",
+  "webDir": "www",
+  "server": {
+    "url": "https://resolve-1-889i.onrender.com",
+    "cleartext": false
+  },
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#07090e",
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}
