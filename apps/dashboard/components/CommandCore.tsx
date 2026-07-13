@@ -8,6 +8,7 @@ import {
   makeRecognition,
   preloadVoices,
   speak,
+  usesSttEngine,
   type SpeechRecognitionLike,
 } from "@/lib/speech";
 import {
@@ -298,7 +299,10 @@ export function CommandCore() {
         }
       },
     });
-    if (!isMobile()) startBargeIn(); // talk-over on desktop only (iOS mutes replies)
+    // talk-over only where the recognizer can run concurrently: not on iOS
+    // (audio session conflict), and not with server-STT (it would transcribe
+    // our own TTS, wasting calls). Desktop Web-Speech only.
+    if (!isMobile() && !usesSttEngine()) startBargeIn();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 

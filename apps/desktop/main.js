@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, systemPreferences } = require("electron");
 
 // RESOLVE — native desktop shell. Personal use. Loads the live dashboard, so it
 // auto-updates whenever you deploy (never needs a rebuild for features).
@@ -51,7 +51,16 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // trigger the macOS microphone permission prompt up front so getUserMedia
+  // (used by the ElevenLabs speech-to-text recorder) can access the mic
+  if (process.platform === "darwin") {
+    try {
+      await systemPreferences.askForMediaAccess("microphone");
+    } catch {
+      /* user can still grant it later in System Settings */
+    }
+  }
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

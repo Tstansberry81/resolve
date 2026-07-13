@@ -4,6 +4,13 @@
 // command mic, and the reply speaker so they behave identically across surfaces.
 
 import { setSpeaking } from "./voice";
+import { makeSttRecognition } from "./sttRecognition";
+
+declare global {
+  interface Window {
+    resolveDesktop?: boolean;
+  }
+}
 
 // Chrome loads voices asynchronously; kick a load so pickVoice() isn't empty
 // on the first utterance.
@@ -26,8 +33,21 @@ export type SpeechRecognitionLike = {
   onerror: (() => void) | null;
 };
 
+// The Web Speech API's recognizer doesn't work inside the Electron desktop app
+// (no Google speech backend). There we fall back to server-side STT (ElevenLabs
+// Scribe) via a recognizer with the same interface. window.resolveDesktop is
+// set by the Electron shell.
+export function usesSttEngine(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.resolveDesktop === true;
+}
+
 export function makeRecognition(): SpeechRecognitionLike | null {
   if (typeof window === "undefined") return null;
+  if (usesSttEngine()) {
+    // lazy require so the WebAudio/MediaRecorder code only loads when needed
+    return makeSttRecognition();
+  }
   const w = window as unknown as Record<string, new () => SpeechRecognitionLike>;
   const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
   return Ctor ? new Ctor() : null;
@@ -35,6 +55,7 @@ export function makeRecognition(): SpeechRecognitionLike | null {
 
 export function speechSupported(): boolean {
   if (typeof window === "undefined") return false;
+  if (usesSttEngine()) return true; // STT engine handles it in the desktop app
   const w = window as unknown as Record<string, unknown>;
   return Boolean(w.SpeechRecognition ?? w.webkitSpeechRecognition);
 }
