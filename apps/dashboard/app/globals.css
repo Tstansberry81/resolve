@@ -1527,6 +1527,27 @@ body::before {
   box-shadow: 0 0 60px 12px rgba(62, 224, 255, 0.35);
 }
 
+/* green flare when a mission/step completes — a quick celebratory burst */
+.orb-stage[data-flare="true"] .orb-halo {
+  animation: orb-complete 1.6s var(--ease-out);
+}
+
+.orb-stage[data-flare="true"] .orb-ring-a {
+  animation: orb-complete-ring 1.6s var(--ease-out);
+}
+
+@keyframes orb-complete {
+  0% { box-shadow: 0 0 0 0 rgba(53, 227, 156, 0); }
+  18% { box-shadow: 0 0 80px 22px rgba(53, 227, 156, 0.75); }
+  100% { box-shadow: 0 0 0 0 rgba(53, 227, 156, 0); }
+}
+
+@keyframes orb-complete-ring {
+  0% { border-color: rgba(53, 227, 156, 0); transform: scale(1); }
+  25% { border-color: rgba(53, 227, 156, 0.8); }
+  100% { border-color: rgba(53, 227, 156, 0); transform: scale(1.12); }
+}
+
 /* ── local-exec toggle ──────────────────────────────────────────────────── */
 
 .exec-toggle {

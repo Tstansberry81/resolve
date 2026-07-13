@@ -21,13 +21,37 @@ const STATE_LABEL: Record<string, string> = {
 const EMPTY_VOICE = { wakeOn: false, active: false, speaking: false };
 
 export function CommandCore() {
-  const { orb, orbCaption, emergencyStopped } = useEngine();
+  const { orb, orbCaption, emergencyStopped, events } = useEngine();
   const voice = useSyncExternalStore(subscribeVoice, getVoice, () => EMPTY_VOICE);
   const [text, setText] = useState("");
   const [listening, setListening] = useState(false);
+  const [flare, setFlare] = useState(false);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const activeRef = useRef(false);
   activeRef.current = voice.active;
+  const flareSeenRef = useRef<number | null>(null);
+
+  // Green flare when a mission/step completes. Event ids are monotonic, so we
+  // track the newest completion we've flared for (order-independent) and skip
+  // whatever was already in the feed at mount.
+  useEffect(() => {
+    let newest = -1;
+    for (const e of events) {
+      if ((e.type === "goal.completed" || e.type === "task.completed") && e.id > newest) {
+        newest = e.id;
+      }
+    }
+    if (flareSeenRef.current === null) {
+      flareSeenRef.current = newest; // first pass: don't flare for history
+      return;
+    }
+    if (newest > flareSeenRef.current) {
+      flareSeenRef.current = newest;
+      setFlare(true);
+      const t = setTimeout(() => setFlare(false), 1600);
+      return () => clearTimeout(t);
+    }
+  }, [events]);
 
   const submit = () => {
     const t = text.trim();
@@ -154,7 +178,12 @@ export function CommandCore() {
         {voice.active ? "VOICE MODE" : STATE_LABEL[orb]}
       </span>
 
-      <div className="orb-stage" data-state={voice.active ? "listening" : orb} data-voice={voice.active}>
+      <div
+        className="orb-stage"
+        data-state={voice.active ? "listening" : orb}
+        data-voice={voice.active}
+        data-flare={flare}
+      >
         <div className="orb-halo" />
         <div className="orb-ring orb-ring-a" />
         <div className="orb-ring orb-ring-b" />
