@@ -21,7 +21,7 @@ import anthropic
 import anyio
 
 from . import bus, costs, executor, store
-from .connectors import gcal, gmail_imap, local_llm, notion_api, vault_github
+from .connectors import gcal, gmail_imap, local_llm, notion_api, simplefin, vault_github
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
 from .tools_def import SYSTEM, TOOL_POLICY, TOOLS
@@ -64,6 +64,10 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         return gcal.delete_event(str(args["event_id"]))
     if name == "ask_local":
         return local_llm.chat(str(args["prompt"]))
+    if name == "get_finance":
+        s = simplefin.summary(int(args.get("days", 30)))
+        # trim the transaction list for the model — it just needs the shape
+        return {**s, "transactions": s.get("transactions", [])[:15]}
     raise ValueError(f"unknown tool {name}")
 
 
@@ -73,6 +77,7 @@ CONNECTOR_AVAILABLE = {
     "gmail": gmail_imap.configured,
     "vault": vault_github.configured,
     "web": local_llm.configured,  # the "web" dot doubles as the local-AI lane
+    "finance": simplefin.configured,
 }
 
 # pending approval id → the action to run on approve

@@ -19,6 +19,7 @@ TOOL_POLICY = {
     "delete_task": ("notion.page.archive", "notion"),
     "delete_calendar_event": ("calendar.delete", "calendar"),
     "ask_local": ("local.ask", "web"),
+    "get_finance": ("finance.read", "finance"),
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -141,6 +142,15 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_finance",
+        "description": "Get Trav's money summary from his connected bank (SimpleFIN): net worth, earnings, expenses, net, by-month, and recent transactions over the last `days` (default 30). Use for any spending/income/balance question.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer", "description": "Lookback window in days (default 30)"}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "plan_project",
         "description": "Hand a complex multi-step goal to the Planner (Opus 4.8) and the Opus executor. Call ONCE with a clear objective; steps run in the background (the executor can research the web) and stream into the event feed.",
         "input_schema": {
@@ -175,7 +185,8 @@ Personality & how you talk to Trav:
   anyone you act toward on his behalf) get the clean, professional version.
 
 How you operate:
-- Answer questions about schedule/tasks/email by CALLING TOOLS first. Never invent data.
+- Answer questions about schedule/tasks/email/money by CALLING TOOLS first. Never invent data.
+  For spending, income, balances, or net worth, call get_finance.
 - Use ISO 8601 datetimes with the America/New_York offset for calendar writes.
 - send_email only queues for Trav's approval; tell him it's waiting on his approval banner.
 - Deletes (delete_task, delete_calendar_event) also queue for approval — look up the id first,
