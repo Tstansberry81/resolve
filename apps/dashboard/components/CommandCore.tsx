@@ -117,6 +117,14 @@ export function CommandCore() {
   const eventsRef = useRef(events);
   eventsRef.current = events;
 
+  // Spoken progress narration for long background tasks (plan → executor steps).
+  // The backend emits `speak.progress` events with a short cue per big step; we
+  // speak them aloud, closing the command mic first so it doesn't hear itself.
+  const narratedRef = useRef<number>(-1); // highest speak.progress id handled
+  const narratePrimedRef = useRef(false); // don't replay backlog on first mount
+  const narrateQueueRef = useRef<string[]>([]);
+  const narratingRef = useRef(false);
+
   const maxEventId = () => {
     let m = -1;
     for (const e of eventsRef.current) if (e.id > m) m = e.id;
@@ -345,6 +353,52 @@ export function CommandCore() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
+
+  // ── Spoken progress narration for long background tasks ────────────────────
+  const drainNarration = () => {
+    if (narratingRef.current || speakingNow()) return; // one at a time, no overlap
+    const next = narrateQueueRef.current.shift();
+    if (!next) return;
+    narratingRef.current = true;
+    speak(next, {
+      onend: () => {
+        narratingRef.current = false;
+        drainNarration(); // speak the next queued cue, if any
+      },
+    });
+  };
+
+  useEffect(() => {
+    if (!voice.wakeOn) return; // voice isn't in use at all
+    let maxId = narratedRef.current;
+    const fresh: { id: number; text: string }[] = [];
+    for (const e of events) {
+      if (e.type === "speak.progress" && e.id > narratedRef.current) {
+        fresh.push({ id: e.id, text: (e.detail ?? e.summary ?? "").trim() });
+        if (e.id > maxId) maxId = e.id;
+      }
+    }
+    narratedRef.current = maxId; // mark seen (even mid-conversation, so no replay)
+    if (!narratePrimedRef.current) {
+      narratePrimedRef.current = true; // first pass: adopt cursor, don't replay backlog
+      return;
+    }
+    // Only speak progress while idle in wake mode — never over an active turn.
+    if (voice.active) return;
+    for (const f of fresh.sort((a, b) => a.id - b.id)) {
+      if (f.text) narrateQueueRef.current.push(f.text);
+    }
+    if (fresh.length) drainNarration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events, voice.active, voice.wakeOn]);
+
+  // Waking into a live turn drops queued narration — the user is talking now.
+  useEffect(() => {
+    if (voice.active) {
+      narrateQueueRef.current = [];
+      narratingRef.current = false;
+    }
+  }, [voice.active]);
 
   const micActive = listening || voice.active;
 

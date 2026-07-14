@@ -65,6 +65,9 @@ PLANNER_SYSTEM = (
     "- The laptop: run_on_laptop (files/shell/real web browsing), open_folder / open_app /"
     " open_website\n"
     "- Calendar/tasks: create_calendar_event, create_task\n"
+    "Give each step a `say`: a 2-4 word present-tense spoken cue RESOLVE says aloud"
+    " as it starts that step (e.g. 'researching resources', 'writing the doc',"
+    " 'checking your calendar', 'wrapping up'). Natural and friendly, no jargon.\n"
     "Keep each step's instructions TERSE — one or two sentences of what to do, no"
     " preamble, no restating the goal. Web research is capped at a few searches total,"
     " so don't plan a step per query; one 'research X' step covers it. Do NOT plan"
@@ -100,6 +103,8 @@ PLAN_TOOL = {
                     "properties": {
                         "title": {"type": "string"},
                         "instructions": {"type": "string"},
+                        "say": {"type": "string",
+                                "description": "2-4 word spoken cue said aloud when this step starts"},
                     },
                     "required": ["title", "instructions"],
                 },
@@ -175,6 +180,7 @@ async def plan_project(goal_id: str, objective: str) -> dict[str, Any]:
         await queue.put({"goal_id": goal_id, "task_id": task_id,
                          "title": row["title"],
                          "instructions": step.get("instructions", ""),
+                         "say": str(step.get("say", "")).strip(),
                          "objective": objective})
     return {"queued": len(steps), "steps": titles}
 
@@ -325,6 +331,11 @@ async def _run_step(item: dict[str, Any]) -> None:
     await bus.set_orb("executing", f"Executor working: {title}", ["executor"])
     await bus.emit("executor", "task.started", f"Executor picked up: {title}",
                    goal_id=goal_id)
+    # Spoken progress cue for the big steps — the dashboard narrates these aloud
+    # while the plan runs in the background. Falls back to a short title phrase.
+    cue = item.get("say") or " ".join(title.split()[:4])
+    if cue:
+        await bus.emit("assistant", "speak.progress", cue, goal_id=goal_id)
 
     context = (
         f"Goal: {item['objective']}\nStep: {title}\nInstructions: {item['instructions']}"
@@ -424,10 +435,12 @@ async def worker_loop() -> None:
                            f"Halted — dropped: {item['title']}", level="warn",
                            goal_id=item["goal_id"])
             continue
+        completed_ok = False
         try:
             # run the step as a cancellable task so 'stop' can kill it mid-flight
             _current_step_task = asyncio.create_task(_run_step(item))
             await _current_step_task
+            completed_ok = True
         except asyncio.CancelledError:
             await _mark_task(item["task_id"], "cancelled")
             await bus.emit("executor", "task.cancelled",
@@ -442,3 +455,7 @@ async def worker_loop() -> None:
             _current_step_task = None
         if queue.empty():
             await bus.set_orb("idle", "Sonnet standing by", [])
+            # spoken sign-off once the whole plan is done (not on stop/failure)
+            if completed_ok:
+                await bus.emit("assistant", "speak.progress", "All wrapped up.",
+                               goal_id=item.get("goal_id"))
