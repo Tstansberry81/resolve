@@ -15,7 +15,7 @@ import type { SpeechRecognitionLike } from "./speech";
 // energy thresholds (0..1 RMS on the analyser); tuned for a laptop mic
 const SPEECH_ON = 0.045; // rises above this → speech started
 const SPEECH_OFF = 0.03; // falls below this for SILENCE_MS → utterance ended
-const SILENCE_MS = 900; // trailing silence that ends an utterance
+const SILENCE_MS = 550; // trailing silence that ends an utterance (snappier turns)
 const MAX_UTTER_MS = 15000; // hard cap on one utterance
 const NO_SPEECH_MS = 8000; // give up waiting for speech onset (one-shot)
 const POLL_MS = 100;

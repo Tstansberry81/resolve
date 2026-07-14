@@ -13,7 +13,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 const DEFAULT_VOICE = "onwK4e9ZLuTAKqWW03F9"; // Daniel — deep British male, Jarvis-ish
-const DEFAULT_MODEL = "eleven_turbo_v2_5";
+const DEFAULT_MODEL = "eleven_flash_v2_5"; // fastest gen (~75ms) for low-latency replies
 // ElevenLabs speaking rate (voice_settings.speed). 1.0 = normal; range 0.7–1.2.
 // Bumped a touch so RESOLVE talks faster. Override with ELEVENLABS_SPEED.
 const SPEED = Math.min(1.2, Math.max(0.7, Number(process.env.ELEVENLABS_SPEED || "1.14")));
