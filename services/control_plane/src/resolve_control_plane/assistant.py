@@ -20,8 +20,8 @@ from zoneinfo import ZoneInfo
 import anthropic
 import anyio
 
-from . import bus, costs, executor, store
-from .connectors import gcal, gmail_imap, local_llm, notion_api, simplefin, vault_github
+from . import artifacts, bus, costs, executor, store
+from .connectors import composio, gcal, gmail_imap, local_llm, notion_api, simplefin, vault_github
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
 from .tools_def import SYSTEM, TOOL_POLICY, TOOLS
@@ -71,7 +71,31 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "run_on_laptop":
         from . import local
         return local.enqueue(str(args["task"]))
+    if name == "create_google_doc":
+        res = composio.create_doc(str(args["title"]), str(args.get("content", "")))
+        _log_gdrive_artifact(res)
+        return res
+    if name == "create_google_sheet":
+        res = composio.create_sheet(str(args["title"]), args.get("rows") or None)
+        _log_gdrive_artifact(res)
+        return res
+    if name == "create_google_slides":
+        res = composio.create_slides(str(args["title"]), str(args["content"]))
+        _log_gdrive_artifact(res)
+        return res
     raise ValueError(f"unknown tool {name}")
+
+
+def _log_gdrive_artifact(res: dict[str, Any]) -> None:
+    """Drop a created Google file into the Artifacts dock with its clickable link."""
+    url = res.get("url")
+    if not url:
+        return
+    try:
+        artifacts.record(str(res.get("title") or "Google file"), url,
+                         location="gdrive", href=url, action="created")
+    except Exception:
+        pass
 
 
 CONNECTOR_AVAILABLE = {
@@ -82,6 +106,7 @@ CONNECTOR_AVAILABLE = {
     "web": local_llm.configured,  # the "web" dot doubles as the local-AI lane
     "finance": simplefin.configured,
     "local": lambda: __import__("resolve_control_plane.local", fromlist=["online"]).online(),
+    "google": composio.configured,
 }
 
 # pending approval id → the action to run on approve

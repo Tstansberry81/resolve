@@ -75,7 +75,7 @@ def connectors() -> dict:
 
 def _connector_health() -> list[dict]:
     labels = {"vault": "Vault (GitHub)", "gmail": "Gmail", "calendar": "Calendar",
-              "notion": "Notion"}
+              "notion": "Notion", "google": "Google Docs"}
     out = []
     for cid, check in CONNECTOR_AVAILABLE.items():
         out.append({"id": cid, "label": labels.get(cid, cid),
@@ -313,6 +313,37 @@ async def finance_summary(days: int = 90, refresh: bool = False) -> dict:
         return await anyio.to_thread.run_sync(lambda: simplefin.summary(days, refresh))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"SimpleFIN fetch failed: {exc}")
+
+
+@app.get("/v1/integrations/google/status", dependencies=[Depends(auth)])
+def google_status() -> dict:
+    from .connectors import composio
+    return {"configured": composio.configured()}
+
+
+@app.post("/v1/integrations/google/test", dependencies=[Depends(auth)])
+async def google_test() -> dict:
+    """Create a throwaway Google Doc to verify the Composio wiring end-to-end
+    without going through the assistant. Returns the doc link."""
+    from .connectors import composio
+    if not composio.configured():
+        raise HTTPException(status_code=409, detail="Composio not configured (COMPOSIO_API_KEY unset)")
+    try:
+        res = await anyio.to_thread.run_sync(
+            lambda: composio.create_doc(
+                "RESOLVE wiring test",
+                "# It works ✅\nRESOLVE's control plane created this via Composio.",
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Google Docs create failed: {exc}")
+    try:
+        from . import artifacts
+        artifacts.record("RESOLVE wiring test", res.get("url", ""), location="gdrive",
+                         href=res.get("url"), action="created")
+    except Exception:
+        pass
+    return {"ok": True, **res}
 
 
 @app.post("/v1/routines/morning_brief", dependencies=[Depends(auth)])

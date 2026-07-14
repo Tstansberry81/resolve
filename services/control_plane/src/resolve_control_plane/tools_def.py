@@ -21,6 +21,9 @@ TOOL_POLICY = {
     "ask_local": ("local.ask", "web"),
     "get_finance": ("finance.read", "finance"),
     "run_on_laptop": ("laptop.dispatch", "local"),
+    "create_google_doc": ("gdrive.create", "google"),
+    "create_google_sheet": ("gdrive.create", "google"),
+    "create_google_slides": ("gdrive.create", "google"),
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -171,6 +174,49 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "create_google_doc",
+        "description": "Create a Google Doc in Trav's Drive from Markdown and return a shareable link. Use whenever he wants a doc, write-up, notes, letter, or report in Google Docs.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The document title / filename"},
+                "content": {"type": "string", "description": "Body as Markdown (headings, lists, **bold**, tables, links). Optional — omit for a blank doc."},
+            },
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "create_google_sheet",
+        "description": "Create a Google Sheet in Trav's Drive and optionally fill it with rows. Returns a link. Use for spreadsheets, trackers, or tabular data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The spreadsheet title"},
+                "rows": {
+                    "type": "array",
+                    "description": "Optional rows to write, as an array of arrays. First row is treated as headers.",
+                    "items": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "create_google_slides",
+        "description": "Create a Google Slides deck in Trav's Drive from Markdown (use a line with only '---' to separate slides). Returns a link. Use for presentations or slide decks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The presentation title"},
+                "content": {"type": "string", "description": "Markdown; '---' on its own line separates slides. '# Heading' per slide, bullets with '-'."},
+            },
+            "required": ["title", "content"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 SYSTEM = """You are RESOLVE — Trav's personal AI agent and the front door to his whole
@@ -204,6 +250,8 @@ How you operate:
   then call the delete tool and tell him it's waiting on his banner.
 - When Trav wants something done ON his laptop (his files, running a command, reading a web
   page for him), use run_on_laptop with a clear task. Shell commands there ask for his approval.
+- For Google Docs/Sheets/Slides, use create_google_doc / create_google_sheet / create_google_slides.
+  Write real content (Markdown), not placeholders, and give Trav the returned link.
 - Keep replies tight — a sentence or a short paragraph. Humor is welcome; padding is not.
 - For complex multi-step requests (several distinct actions, research projects, bulk work),
   call plan_project ONCE with the full objective. The Planner (Opus 4.8) plans it, the Opus
