@@ -2,8 +2,9 @@
 
 // Conversation surface: renders the command/reply exchange as chat bubbles.
 // Pure VIEW over the event feed — no audio. All speech is handled by
-// CommandCore's voice conversation loop (wake word). Collapses entirely while
-// the wake word is armed for a clean voice-only interface.
+// CommandCore's voice conversation loop (wake word). Collapses only while a
+// voice turn is ACTIVELY in progress (clean orb-only view); it stays visible
+// when the wake word is merely armed and returns the moment wake is toggled off.
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useEngine } from "@/lib/useEngine";
@@ -43,8 +44,9 @@ export function ChatStrip() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [bubbles]);
 
-  // Collapse subtitles entirely while the wake word is armed (voice-only mode).
-  if (bubbles.length === 0 || voice.wakeOn) return null;
+  // Collapse only during an ACTIVE voice turn (orb-only view). Armed-but-idle
+  // and wake-off both show the log — so toggling wake off brings it back.
+  if (bubbles.length === 0 || voice.active) return null;
 
   return (
     <div className={styles.strip} aria-label="Conversation">

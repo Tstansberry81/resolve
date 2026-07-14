@@ -83,17 +83,33 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         res = composio.create_slides(str(args["title"]), str(args["content"]))
         _log_gdrive_artifact(res)
         return res
+    if name == "find_google_file":
+        return composio.find_file(str(args["query"]))
+    if name == "edit_google_doc":
+        res = composio.edit_doc(str(args["document_id"]), str(args["content"]))
+        _log_gdrive_artifact({**res, "title": args.get("name", "Google Doc")}, action="updated")
+        return res
+    if name == "edit_google_sheet":
+        res = composio.edit_sheet(str(args["spreadsheet_id"]), args["rows"], args.get("range"))
+        _log_gdrive_artifact({**res, "title": args.get("name", "Google Sheet")}, action="updated")
+        return res
+    if name == "add_google_slides":
+        res = composio.add_slides(str(args["presentation_id"]), str(args["content"]))
+        _log_gdrive_artifact({**res, "title": args.get("name", "Google Slides")}, action="updated")
+        return res
+    if name == "delete_google_file":
+        return composio.trash_file(str(args["file_id"]))
     raise ValueError(f"unknown tool {name}")
 
 
-def _log_gdrive_artifact(res: dict[str, Any]) -> None:
-    """Drop a created Google file into the Artifacts dock with its clickable link."""
+def _log_gdrive_artifact(res: dict[str, Any], action: str = "created") -> None:
+    """Drop a created/edited Google file into the Artifacts dock with its link."""
     url = res.get("url")
     if not url:
         return
     try:
         artifacts.record(str(res.get("title") or "Google file"), url,
-                         location="gdrive", href=url, action="created")
+                         location="gdrive", href=url, action=action)
     except Exception:
         pass
 

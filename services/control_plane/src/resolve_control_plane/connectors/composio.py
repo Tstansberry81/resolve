@@ -118,3 +118,68 @@ def create_slides(title: str, markdown_text: str) -> dict:
     pid = data.get("presentation_id") or data.get("presentationId")
     url = f"https://docs.google.com/presentation/d/{pid}/edit" if pid else ""
     return {"url": url, "id": pid, "title": title, "slides": data.get("slide_count")}
+
+
+# ── find / edit / delete ────────────────────────────────────────────────────
+
+
+def find_file(query: str, limit: int = 8) -> dict:
+    """Search the user's Drive. Plain text → name-contains; full Drive query syntax
+    (name/mimeType/etc.) is passed through."""
+    q = (query or "").strip()
+    ops = ("=", "contains", " in ", ">", "<", "mimeType", "trashed")
+    qexpr = q if any(o in q for o in ops) else f"name contains '{q}' and trashed = false"
+    data = execute(
+        "GOOGLEDRIVE_FIND_FILE",
+        {"q": qexpr, "fields": "files(id,name,mimeType,webViewLink)", "pageSize": limit},
+    )
+    files = data.get("files") or []
+    return {
+        "files": [
+            {"id": f.get("id"), "name": f.get("name"),
+             "mimeType": f.get("mimeType"), "url": f.get("webViewLink")}
+            for f in files
+        ]
+    }
+
+
+def edit_doc(document_id: str, markdown_text: str) -> dict:
+    """Append Markdown to an existing Google Doc."""
+    data = execute(
+        "GOOGLEDOCS_UPDATE_DOCUMENT_SECTION_MARKDOWN",
+        {"document_id": document_id, "markdown_text": markdown_text},
+    )
+    did = data.get("documentId") or document_id
+    url = data.get("display_url") or f"https://docs.google.com/document/d/{did}/edit"
+    return {"url": url, "id": did}
+
+
+def edit_sheet(spreadsheet_id: str, rows: list[list], cell_range: str | None = None) -> dict:
+    """Write rows into a Google Sheet (defaults to Sheet1 from A1)."""
+    if not cell_range:
+        ncols = max((len(r) for r in rows), default=1)
+        cell_range = f"Sheet1!A1:{_col_letter(max(ncols, 1))}{len(rows)}"
+    execute(
+        "GOOGLESHEETS_VALUES_UPDATE",
+        {"spreadsheet_id": spreadsheet_id, "range": cell_range,
+         "value_input_option": "USER_ENTERED", "values": rows},
+    )
+    return {"url": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit",
+            "id": spreadsheet_id, "rowsWritten": len(rows)}
+
+
+def add_slides(presentation_id: str, markdown_text: str) -> dict:
+    """Append slides (from Markdown, '---' between slides) to an existing deck."""
+    execute(
+        "GOOGLESLIDES_PRESENTATIONS_BATCH_UPDATE",
+        {"presentationId": presentation_id, "markdown_text": markdown_text},
+    )
+    return {"url": f"https://docs.google.com/presentation/d/{presentation_id}/edit",
+            "id": presentation_id}
+
+
+def trash_file(file_id: str) -> dict:
+    """Move a Drive file to trash (soft delete — recoverable)."""
+    data = execute("GOOGLEDRIVE_TRASH_FILE", {"file_id": file_id})
+    return {"trashed": True, "id": data.get("id", file_id),
+            "name": data.get("name", ""), "url": data.get("display_url", "")}

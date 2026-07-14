@@ -111,6 +111,15 @@
     "gdrive.create": {
       "risk": "reversible_write"
     },
+    "gdrive.read": {
+      "risk": "read"
+    },
+    "gdrive.edit": {
+      "risk": "reversible_write"
+    },
+    "gdrive.delete": {
+      "risk": "destructive"
+    },
     "vault.read": {
       "risk": "read"
     },

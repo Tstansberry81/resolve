@@ -24,6 +24,11 @@ TOOL_POLICY = {
     "create_google_doc": ("gdrive.create", "google"),
     "create_google_sheet": ("gdrive.create", "google"),
     "create_google_slides": ("gdrive.create", "google"),
+    "find_google_file": ("gdrive.read", "google"),
+    "edit_google_doc": ("gdrive.edit", "google"),
+    "edit_google_sheet": ("gdrive.edit", "google"),
+    "add_google_slides": ("gdrive.edit", "google"),
+    "delete_google_file": ("gdrive.delete", "google"),
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -217,6 +222,73 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "find_google_file",
+        "description": "Find a file in Trav's Google Drive by name (or Drive query). Returns matches with their id, name, type, and link. Use this FIRST to get a file's id before editing or deleting it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "A name to search for (e.g. 'Q3 report'), or a full Drive query."},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "edit_google_doc",
+        "description": "Append Markdown content to an existing Google Doc. Get the document_id from create_google_doc or find_google_file.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "string", "description": "The Google Doc id"},
+                "content": {"type": "string", "description": "Markdown to append"},
+                "name": {"type": "string", "description": "Optional doc name for the activity log"},
+            },
+            "required": ["document_id", "content"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "edit_google_sheet",
+        "description": "Write rows into an existing Google Sheet. Get the spreadsheet_id from create_google_sheet or find_google_file.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "spreadsheet_id": {"type": "string", "description": "The spreadsheet id"},
+                "rows": {"type": "array", "description": "Rows as an array of arrays.", "items": {"type": "array", "items": {"type": "string"}}},
+                "range": {"type": "string", "description": "Optional A1 range (e.g. 'Sheet1!A1'). Defaults to Sheet1 from A1."},
+                "name": {"type": "string", "description": "Optional sheet name for the activity log"},
+            },
+            "required": ["spreadsheet_id", "rows"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "add_google_slides",
+        "description": "Append slides (from Markdown, '---' between slides) to an existing Google Slides deck. Get the presentation_id from create_google_slides or find_google_file.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "presentation_id": {"type": "string", "description": "The presentation id"},
+                "content": {"type": "string", "description": "Markdown for the new slides; '---' separates slides"},
+                "name": {"type": "string", "description": "Optional deck name for the activity log"},
+            },
+            "required": ["presentation_id", "content"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "delete_google_file",
+        "description": "Delete (move to trash — recoverable) a file in Trav's Google Drive by id. Get the file_id from find_google_file first. Requires Trav's approval.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string", "description": "The Drive file id to trash"},
+            },
+            "required": ["file_id"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 SYSTEM = """You are RESOLVE — Trav's personal AI agent and the front door to his whole
@@ -252,6 +324,9 @@ How you operate:
   page for him), use run_on_laptop with a clear task. Shell commands there ask for his approval.
 - For Google Docs/Sheets/Slides, use create_google_doc / create_google_sheet / create_google_slides.
   Write real content (Markdown), not placeholders, and give Trav the returned link.
+  To change an existing file, call find_google_file to get its id, then edit_google_doc /
+  edit_google_sheet / add_google_slides. To remove one, find it then delete_google_file
+  (it trashes the file and asks for Trav's approval first).
 - Keep replies tight — a sentence or a short paragraph. Humor is welcome; padding is not.
 - For complex multi-step requests (several distinct actions, research projects, bulk work),
   call plan_project ONCE with the full objective. The Planner (Opus 4.8) plans it, the Opus
