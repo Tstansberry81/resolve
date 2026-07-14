@@ -530,8 +530,10 @@ body::before {
   min-height: 0;
 }
 
-.rail::-webkit-scrollbar { width: 4px; }
-.rail::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 2px; }
+.rail::-webkit-scrollbar { width: 6px; }
+.rail::-webkit-scrollbar-thumb { background: rgba(62, 224, 255, 0.35); border-radius: 3px; }
+.rail::-webkit-scrollbar-thumb:hover { background: rgba(62, 224, 255, 0.55); }
+.rail { scrollbar-width: thin; scrollbar-color: rgba(62, 224, 255, 0.35) transparent; }
 
 .empty {
   color: var(--text-2);
@@ -1469,11 +1471,16 @@ a.artifact-link:hover {
   position: fixed;
   right: 16px;
   bottom: 16px;
-  width: 300px;
-  max-height: 34vh;
+  width: 284px;
+  /* compact: title + the most recent artifact, the rest scroll in .rail */
+  max-height: 172px;
   z-index: 30;
   display: flex;
   flex-direction: column;
+  /* opaque so it reads as a clean panel over the chat instead of bleeding through */
+  background: rgba(9, 12, 19, 0.94);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 /* ── v2 responsive ─────────────────────────────────────────────────────── */
