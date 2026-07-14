@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@elevenlabs/client": "^1.15.0",
     "@picovoice/porcupine-web": "^4.0.1",
     "@picovoice/web-voice-processor": "^4.0.10",
     "next": "^15.3.0",

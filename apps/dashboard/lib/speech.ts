@@ -5,6 +5,13 @@
 
 import { setSpeaking } from "./voice";
 import { makeSttRecognition } from "./sttRecognition";
+import { makeRealtimeSttRecognition, realtimeUnavailable } from "./sttRealtime";
+
+// Realtime STT (Scribe v2) is on by default in the desktop app; set
+// NEXT_PUBLIC_REALTIME_STT=0 at build time to force the batch recognizer.
+function realtimeSttEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_REALTIME_STT !== "0" && !realtimeUnavailable();
+}
 
 declare global {
   interface Window {
@@ -45,7 +52,9 @@ export function usesSttEngine(): boolean {
 export function makeRecognition(): SpeechRecognitionLike | null {
   if (typeof window === "undefined") return null;
   if (usesSttEngine()) {
-    // lazy require so the WebAudio/MediaRecorder code only loads when needed
+    // Realtime Scribe v2 (streaming, ~150ms) when enabled; it self-heals to the
+    // batch recognizer if the socket/token ever fails, so this is always safe.
+    if (realtimeSttEnabled()) return makeRealtimeSttRecognition();
     return makeSttRecognition();
   }
   const w = window as unknown as Record<string, new () => SpeechRecognitionLike>;
@@ -83,6 +92,9 @@ export function pickVoice(): SpeechSynthesisVoice | null {
 }
 
 let currentAudio: HTMLAudioElement | null = null;
+// Aborts the in-flight TTS fetch/stream so a barge-in stops audio mid-download,
+// not just mid-playback.
+let currentAbort: AbortController | null = null;
 // Bumped every time speech is (re)started or cancelled; late callbacks from a
 // superseded/interrupted utterance check their token and no-op, so a barge-in
 // can't have the old reply's onend reopen the mic or flip the speaking flag.
@@ -91,6 +103,14 @@ let speakSeq = 0;
 // Stop whatever's currently talking, in either lane.
 function stopSpeaking(): void {
   speakSeq++;
+  if (currentAbort) {
+    try {
+      currentAbort.abort();
+    } catch {
+      /* noop */
+    }
+    currentAbort = null;
+  }
   if (currentAudio) {
     try {
       currentAudio.pause();
@@ -100,6 +120,92 @@ function stopSpeaking(): void {
     currentAudio = null;
   }
   if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+}
+
+// Play a chunked audio Response as it arrives via MediaSource Extensions, so the
+// first audio starts before the whole clip has downloaded. Returns true if it
+// took ownership of playback; false if MSE/codec isn't available (caller then
+// falls back to buffered blob playback). Rejects on a mid-stream failure.
+async function playStreaming(
+  resp: Response,
+  onEnded: () => void,
+  onError: () => void,
+): Promise<boolean> {
+  if (
+    typeof MediaSource === "undefined" ||
+    !MediaSource.isTypeSupported("audio/mpeg") ||
+    !resp.body
+  ) {
+    return false;
+  }
+  const media = new MediaSource();
+  const url = URL.createObjectURL(media);
+  const audio = new Audio();
+  audio.src = url;
+  currentAudio = audio;
+  audio.onended = () => {
+    URL.revokeObjectURL(url);
+    if (currentAudio === audio) currentAudio = null;
+    onEnded();
+  };
+  audio.onerror = () => {
+    URL.revokeObjectURL(url);
+    if (currentAudio === audio) currentAudio = null;
+    onError();
+  };
+
+  await new Promise<void>((res, rej) => {
+    media.addEventListener("sourceopen", () => res(), { once: true });
+    media.addEventListener("error", () => rej(new Error("MediaSource error")), { once: true });
+  });
+
+  const sb = media.addSourceBuffer("audio/mpeg");
+  const reader = resp.body.getReader();
+  const queue: Uint8Array[] = [];
+  let streamDone = false;
+  let started = false;
+
+  const flush = () => {
+    if (sb.updating || queue.length === 0) return;
+    try {
+      sb.appendBuffer(queue.shift()! as unknown as BufferSource);
+    } catch {
+      /* QuotaExceeded etc. — let playback drain, retry on updateend */
+    }
+  };
+  sb.addEventListener("updateend", () => {
+    flush();
+    if (streamDone && !sb.updating && queue.length === 0) {
+      try {
+        media.endOfStream();
+      } catch {
+        /* already ended */
+      }
+    }
+    // begin playback as soon as the first chunk is buffered
+    if (!started) {
+      started = true;
+      void audio.play().catch(onError);
+    }
+  });
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      streamDone = true;
+      if (!sb.updating && queue.length === 0) {
+        try {
+          media.endOfStream();
+        } catch {
+          /* noop */
+        }
+      }
+      break;
+    }
+    if (value) queue.push(value);
+    flush();
+  }
+  return true;
 }
 
 // Hard-stop any speech in progress (both lanes) and clear the speaking flag.
@@ -161,16 +267,40 @@ export function speak(text: string, opts: { onend?: () => void } = {}): void {
 
   // Prefer ElevenLabs (real Jarvis voice, proxied server-side); fall back to the
   // browser voice on any failure or when no key is configured (501).
+  const abort = new AbortController();
+  currentAbort = abort;
+  // Browser-voice fallback runs at most once, and never for a superseded turn.
+  let fellBack = false;
+  const fallback = () => {
+    if (fellBack || finished || mySeq !== speakSeq) return;
+    fellBack = true;
+    browserSpeak(clean, finish);
+  };
   void (async () => {
     try {
       const r = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: clean }),
+        signal: abort.signal,
       });
-      if (r.ok) {
-        const blob = await r.blob();
-        if (blob.size > 0) {
+      if (mySeq !== speakSeq) return; // barge-in landed while fetching
+      if (r.ok && r.body) {
+        // 1) stream it as it arrives (lowest latency). playStreaming only
+        // returns false when MSE is unavailable — before it reads the body, so
+        // the buffered path below can still consume r.
+        try {
+          const took = await playStreaming(r, finish, fallback);
+          if (took) return;
+        } catch {
+          if (mySeq !== speakSeq) return; // aborted by a newer turn
+          fallback(); // streaming broke mid-flight → browser voice
+          return;
+        }
+        // 2) buffered fallback (MSE/codec unavailable): download then play
+        const blob = await r.blob().catch(() => null);
+        if (mySeq !== speakSeq) return;
+        if (blob && blob.size > 0) {
           const url = URL.createObjectURL(blob);
           const audio = new Audio(url);
           currentAudio = audio;
@@ -182,15 +312,16 @@ export function speak(text: string, opts: { onend?: () => void } = {}): void {
           audio.onerror = () => {
             URL.revokeObjectURL(url);
             if (currentAudio === audio) currentAudio = null;
-            browserSpeak(clean, finish);
+            fallback();
           };
           await audio.play();
           return;
         }
       }
-      browserSpeak(clean, finish); // 501/empty → browser voice
-    } catch {
-      browserSpeak(clean, finish);
+      fallback(); // 501/empty → browser voice
+    } catch (e) {
+      if ((e as { name?: string })?.name === "AbortError") return; // superseded turn
+      fallback();
     }
   })();
 }
