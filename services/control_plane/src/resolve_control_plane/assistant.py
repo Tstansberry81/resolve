@@ -326,14 +326,13 @@ async def _loop(goal_id: str, text: str) -> None:
     final_text = ""
     tools_ran = False   # did any tool actually execute this request?
     nudges = 0          # anti-hallucination re-prompts used
-    print(f"[DBG] run start: text={text[:70]!r} tools={len(active_tools)} "
-          f"has_create_doc={'create_google_doc' in [t['name'] for t in active_tools]} "
-          f"local_exec={executor.local_exec}", flush=True)
     try:
         for _ in range(MAX_TURNS):
             resp = await client.messages.create(
                 model=ASSISTANT_MODEL,
-                max_tokens=1500,
+                # big enough to hold a full doc/sheet's content inside a single
+                # tool call — 1500 truncated long docs mid-call so nothing ran
+                max_tokens=8000,
                 system=system,
                 tools=active_tools,
                 messages=messages,
@@ -341,11 +340,25 @@ async def _loop(goal_id: str, text: str) -> None:
             costs.record("assistant", ASSISTANT_MODEL, resp.usage)
             tool_uses = [b for b in resp.content if b.type == "tool_use"]
             texts = [b.text for b in resp.content if b.type == "text"]
+            # Cut off mid-response by the token cap — usually a truncated tool
+            # call that never ran. Retry asking for tighter content, don't fake it.
+            if resp.stop_reason == "max_tokens" and not tools_ran:
+                if nudges < 2:
+                    nudges += 1
+                    # can't append the truncated tool call; use a synthetic turn to
+                    # keep roles alternating, then ask for tighter content
+                    messages.append({"role": "assistant",
+                                     "content": "(my last attempt was cut off before it ran)"})
+                    messages.append({"role": "user", "content":
+                        "That was cut off by length before the tool ran, so NOTHING was "
+                        "created. Make the content more concise so the whole tool call fits, "
+                        "and call the tool now."})
+                    continue
+                final_text = ("That got cut off before it went through — nothing was created. "
+                              "Try again and I'll keep it tighter.")
+                break
             if texts:
                 final_text = texts[-1]
-            print(f"[DBG] stop={resp.stop_reason} tools={[b.name for b in tool_uses]} "
-                  f"ran={tools_ran} nudges={nudges} text={(final_text or '')[:90]!r}",
-                  flush=True)
             if resp.stop_reason != "tool_use" or not tool_uses:
                 # It ended without calling a tool. If NOTHING has actually run yet
                 # and either the request was actionable or the reply claims/promises
@@ -354,8 +367,6 @@ async def _loop(goal_id: str, text: str) -> None:
                 reply_is_question = final_text.rstrip().endswith("?")
                 _should = (not tool_uses and not tools_ran and nudges < 2 and not reply_is_question
                            and (_looks_actionable(text) or _claims_action(final_text)))
-                print(f"[DBG] end-of-turn should_nudge={_should} actionable={_looks_actionable(text)} "
-                      f"claims={_claims_action(final_text)} q={reply_is_question}", flush=True)
                 if _should:
                     nudges += 1
                     messages.append({"role": "assistant", "content": resp.content})
@@ -460,9 +471,14 @@ async def _loop(goal_id: str, text: str) -> None:
             messages.append({"role": "user", "content": results})
 
         status = "waiting_approval" if pending_actions else "completed"
-        history.append((text, final_text or "Done."))
+        # Honest fallback: only say "Done." if a tool actually ran. Otherwise don't
+        # imply success — that was the source of the "Done." hallucination.
+        if not final_text:
+            final_text = "Done." if (tools_ran or pending_actions) else (
+                "I couldn't complete that — nothing was created. Mind trying again?")
+        history.append((text, final_text))
         await bus.emit(
-            "assistant", "assistant.reply", final_text[:160] or "Done.",
+            "assistant", "assistant.reply", final_text[:160],
             detail=final_text or None, level="success", goal_id=goal_id,
         )
         try:
