@@ -127,9 +127,36 @@ const TOOLS = [
     input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
   { name: "run_shell", description: "Run a shell command in the workspace. ALWAYS asks the user for approval first.",
     input_schema: { type: "object", properties: { command: { type: "string" }, why: { type: "string" } }, required: ["command"] } },
+  { name: "browser_navigate", description: "Open a URL in a real Chromium browser (persists across steps). Use to start any web task.",
+    input_schema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } },
+  { name: "browser_read", description: "Return the visible text of the current browser page (truncated). Use to read/extract content.",
+    input_schema: { type: "object", properties: {} } },
+  { name: "browser_click", description: "Click an element on the current page by its visible text (preferred) or a CSS selector.",
+    input_schema: { type: "object", properties: { text: { type: "string" }, selector: { type: "string" } } } },
+  { name: "browser_type", description: "Type text into an input on the current page, targeted by CSS selector.",
+    input_schema: { type: "object", properties: { selector: { type: "string" }, text: { type: "string" } }, required: ["selector", "text"] } },
+  { name: "browser_screenshot", description: "Screenshot the current page; saves to the workspace and logs it as an artifact.",
+    input_schema: { type: "object", properties: { fullPage: { type: "boolean" } } } },
+  { name: "browser_close", description: "Close the browser when the web task is finished.",
+    input_schema: { type: "object", properties: {} } },
   { name: "finish", description: "Call when the task is complete, with a short result summary.",
     input_schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] } },
 ];
+
+// ── Playwright browser (lazy, persistent across steps/tasks) ─────────────────
+let _browser = null, _page = null;
+async function ensurePage() {
+  if (_page && !_page.isClosed()) return _page;
+  const { chromium } = await import("playwright");
+  // headful (visible) by default so Trav can watch it work; PW_HEADLESS=1 hides it
+  _browser = await chromium.launch({ headless: process.env.PW_HEADLESS === "1" });
+  _page = await _browser.newPage({ viewport: { width: 1280, height: 900 } });
+  return _page;
+}
+async function closeBrowser() {
+  try { if (_browser) await _browser.close(); } catch { /* noop */ }
+  _browser = null; _page = null;
+}
 
 async function walk(dir, out, base) {
   for (const e of await fs.readdir(dir, { withFileTypes: true })) {
@@ -213,6 +240,49 @@ async function runTool(taskId, name, args) {
       });
     });
   }
+  if (name === "browser_navigate") {
+    const page = await ensurePage();
+    const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(String(args.url)) ? String(args.url) : "https://" + String(args.url);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await emit(taskId, `browser → ${url}`);
+    return `Navigated to ${page.url()} — "${await page.title()}"`;
+  }
+  if (name === "browser_read") {
+    const page = await ensurePage();
+    const text = await page.evaluate(() => document.body?.innerText || "");
+    return text.replace(/\n{3,}/g, "\n\n").slice(0, 12000) || "(page has no visible text yet)";
+  }
+  if (name === "browser_click") {
+    const page = await ensurePage();
+    const target = String(args.text || args.selector || "");
+    try {
+      if (args.text) await page.getByText(target, { exact: false }).first().click({ timeout: 8000 });
+      else await page.click(target, { timeout: 8000 });
+    } catch (e) {
+      return `Couldn't click "${target}": ${e.message.slice(0, 120)}`;
+    }
+    await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
+    await emit(taskId, `browser: clicked "${target.slice(0, 40)}"`);
+    return `Clicked "${target}". Now at ${page.url()}`;
+  }
+  if (name === "browser_type") {
+    const page = await ensurePage();
+    await page.fill(String(args.selector), String(args.text || ""), { timeout: 8000 });
+    return `Typed into ${args.selector}`;
+  }
+  if (name === "browser_screenshot") {
+    const page = await ensurePage();
+    await fs.mkdir(ROOT, { recursive: true });
+    const p = path.join(ROOT, `shot-${Date.now()}.png`);
+    await page.screenshot({ path: p, fullPage: Boolean(args.fullPage) });
+    await artifact(taskId, p, "local", "created");
+    await emit(taskId, `browser: screenshot → ${path.basename(p)}`);
+    return `Saved screenshot to ${p} (${page.url()})`;
+  }
+  if (name === "browser_close") {
+    await closeBrowser();
+    return "Browser closed.";
+  }
   throw new Error(`unknown tool ${name}`);
 }
 
@@ -234,7 +304,10 @@ async function runTask(taskId, task) {
     "You are the RESOLVE local worker running on Trav's Mac. Accomplish the task using your " +
     `tools. Files are sandboxed to the workspace at ${ROOT}. run_shell requires Trav's approval ` +
     "and should be used sparingly and safely — never destructive commands. Read before you write. " +
-    "When done, call finish with a concise summary of what you did.";
+    "For web tasks (visit a site and read/click/type/extract), drive a real Chromium browser: " +
+    "browser_navigate to a URL, then browser_read to extract, browser_click (by visible text) and " +
+    "browser_type to interact, browser_screenshot to capture. Call browser_close when finished. " +
+    "When done, call finish with a concise summary (include what you found/did).";
   if (manual) {
     system +=
       `\n\n--- SECOND BRAIN ---\nTrav's Obsidian vault is at ${VAULT}. Use the vault_* tools for ` +

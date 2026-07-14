@@ -8,6 +8,7 @@
     "start": "node worker.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.1"
+    "@anthropic-ai/sdk": "^0.32.1",
+    "playwright": "^1.49.0"
   }
 }

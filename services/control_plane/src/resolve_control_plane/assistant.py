@@ -32,6 +32,9 @@ log = logging.getLogger("resolve.assistant")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-sonnet-4-6")
 MAX_TURNS = 8
 
+# what to tell Trav to run when his laptop worker is offline
+WORKER_RESTART_CMD = "launchctl kickstart -k gui/$(id -u)/com.resolve.localworker"
+
 # The model hallucinates in two ways when it ends a turn WITHOUT calling a tool:
 # it promises ("creating it now") or falsely claims completion ("Done."). Either
 # is a lie if no tool ran. We detect both, plus whether the user's request was
@@ -450,10 +453,20 @@ async def _loop(goal_id: str, text: str) -> None:
                     )
                     continue
                 if not CONNECTOR_AVAILABLE[node]():
+                    if node == "local":
+                        msg = (
+                            "Trav's laptop worker is OFFLINE, so this can't run right now. "
+                            "Tell him his RESOLVE worker is down and give him this to turn it "
+                            "back on — run in Terminal:\n\n"
+                            f"    {WORKER_RESTART_CMD}\n\n"
+                            "(or, if that doesn't work: `cd ~/claude/resolve/apps/local-worker "
+                            "&& ./run.sh`). Once it's back, ask me again."
+                        )
+                    else:
+                        msg = f"The {node} connector isn't configured on this deployment yet."
                     results.append(
                         {"type": "tool_result", "tool_use_id": tu.id,
-                         "content": f"The {node} connector isn't configured on this deployment yet.",
-                         "is_error": True}
+                         "content": msg, "is_error": True}
                     )
                     await bus.emit(
                         node, "connector.unavailable", f"{node} not configured — {tu.name} skipped",
