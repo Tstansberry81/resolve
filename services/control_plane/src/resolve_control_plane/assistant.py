@@ -303,8 +303,10 @@ async def _loop(goal_id: str, text: str) -> None:
     client = anthropic.AsyncAnthropic()
     await bus.set_orb("listening", "Sonnet heard you — parsing the request", ["assistant"])
     await bus.emit(
+        # summary stays short for the compact event feed; detail carries the FULL
+        # command so the chat bubble can show everything (no more cut-off messages)
         "assistant", "goal.accepted", f"Goal accepted: {text[:120]}",
-        detail=f"model: {ASSISTANT_MODEL} · autonomy: execute", goal_id=goal_id,
+        detail=text, goal_id=goal_id,
     )
     await bus.set_orb("thinking", "Sonnet is working your request", ["assistant"])
 

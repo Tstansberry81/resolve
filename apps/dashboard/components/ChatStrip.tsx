@@ -26,7 +26,9 @@ function toBubbles(events: AgentEvent[]): Bubble[] {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (e.type === "goal.accepted") {
-      out.push({ id: e.id, who: "you", text: e.summary.replace(/^Goal accepted: /, "") });
+      // prefer the full command in detail; fall back to the (truncated) summary
+      const full = (e.detail && e.detail.trim()) || e.summary.replace(/^Goal accepted: /, "");
+      out.push({ id: e.id, who: "you", text: full });
     } else if (e.type === "assistant.reply") {
       out.push({ id: e.id, who: "sonnet", text: e.detail ?? e.summary });
     }
