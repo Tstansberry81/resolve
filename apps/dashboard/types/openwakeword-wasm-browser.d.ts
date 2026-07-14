@@ -3,6 +3,7 @@
 declare module "openwakeword-wasm-browser" {
   export interface WakeWordEngineOptions {
     keywords?: string[];
+    modelFiles?: Record<string, string>;
     baseAssetUrl?: string;
     ortWasmPath?: string;
     sampleRate?: number;

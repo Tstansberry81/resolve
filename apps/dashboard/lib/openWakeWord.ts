@@ -18,7 +18,12 @@
 //   NEXT_PUBLIC_WAKE_MODELS_URL  — base URL for the model files
 
 const MODELS_URL = process.env.NEXT_PUBLIC_WAKE_MODELS_URL || "/openwakeword/models";
-const KEYWORD = process.env.NEXT_PUBLIC_WAKE_KEYWORD || "hey_jarvis";
+// Default is our custom-trained "hey resolve" head; swap via env to a pretrained
+// keyword (hey_jarvis, alexa, …) or another custom model.
+const KEYWORD = process.env.NEXT_PUBLIC_WAKE_KEYWORD || "hey_resolve";
+// Filename for the keyword head. Pretrained keywords resolve via the package's
+// MODEL_FILE_MAP; a custom keyword defaults to "<keyword>.onnx".
+const MODEL_FILE = process.env.NEXT_PUBLIC_WAKE_MODEL_FILE || `${KEYWORD}.onnx`;
 const THRESHOLD = Math.min(
   0.95,
   Math.max(0.2, Number(process.env.NEXT_PUBLIC_WAKE_THRESHOLD || "0.5")),
@@ -37,10 +42,18 @@ export function wakePhraseLabel(): string {
 /** Start listening for the wake word. Resolves to a teardown fn. Rejects if it
  *  can't initialise (caller falls back to another engine). */
 export async function startOpenWakeWord(onWake: () => void): Promise<() => void> {
-  const { WakeWordEngine } = await import("openwakeword-wasm-browser");
+  const { WakeWordEngine, MODEL_FILE_MAP } = await import("openwakeword-wasm-browser");
+
+  // Known keywords resolve via the package map; a custom keyword (or an explicit
+  // NEXT_PUBLIC_WAKE_MODEL_FILE) maps to its own .onnx file.
+  const modelFiles: Record<string, string> = { ...MODEL_FILE_MAP };
+  if (process.env.NEXT_PUBLIC_WAKE_MODEL_FILE || !(KEYWORD in MODEL_FILE_MAP)) {
+    modelFiles[KEYWORD] = MODEL_FILE;
+  }
 
   const engine = new WakeWordEngine({
     keywords: [KEYWORD],
+    modelFiles,
     baseAssetUrl: MODELS_URL,
     detectionThreshold: THRESHOLD,
     cooldownMs: 2500, // ignore repeat fires for 2.5s after a wake
