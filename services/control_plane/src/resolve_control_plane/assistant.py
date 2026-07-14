@@ -335,29 +335,52 @@ async def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
     if action is None:
         return {"ok": False, "error": "unknown or already-decided approval"}
     _fanout_approval(approval_id, action["summary"], action["risk"], action["preview"], status)
+
+    goal_id = action["goal_id"]
+    outcome: dict[str, Any]
+    goal_status = "completed"
     if decision != "approved":
         await bus.emit(
             "assistant", "action.held", f"Rejected — {action['summary']} stays parked",
-            level="warn", goal_id=action["goal_id"],
+            level="warn", goal_id=goal_id,
         )
-        return {"ok": True, "executed": False}
-    node = TOOL_POLICY[action["tool"]][1]
-    try:
-        result = await anyio.to_thread.run_sync(
-            lambda: _connector_call(action["tool"], action["args"])
-        )
-        await bus.emit(
-            node, f"{action['tool']}.executed", f"Approved and executed — {action['summary']}",
-            detail=json.dumps(result)[:300], level="success",
-            edge={"from": "assistant", "to": node}, goal_id=action["goal_id"],
-        )
-        return {"ok": True, "executed": True, "result": result}
-    except Exception as exc:
-        await bus.emit(
-            node, f"{action['tool']}.failed", f"Approved but failed: {exc}",
-            level="error", goal_id=action["goal_id"],
-        )
-        return {"ok": True, "executed": False, "error": str(exc)}
+        goal_status = "cancelled"
+        outcome = {"ok": True, "executed": False}
+    else:
+        node = TOOL_POLICY[action["tool"]][1]
+        try:
+            result = await anyio.to_thread.run_sync(
+                lambda: _connector_call(action["tool"], action["args"])
+            )
+            await bus.emit(
+                node, f"{action['tool']}.executed", f"Approved and executed — {action['summary']}",
+                detail=json.dumps(result)[:300], level="success",
+                edge={"from": "assistant", "to": node}, goal_id=goal_id,
+            )
+            outcome = {"ok": True, "executed": True, "result": result}
+        except Exception as exc:
+            await bus.emit(
+                node, f"{action['tool']}.failed", f"Approved but failed: {exc}",
+                level="error", goal_id=goal_id,
+            )
+            goal_status = "failed"
+            outcome = {"ok": True, "executed": False, "error": str(exc)}
+
+    # Clear the parked state so the orb and the sidebar mission don't stay stuck on
+    # "awaiting you". Only settle the goal/orb once nothing else is pending.
+    still_pending_for_goal = any(a.get("goal_id") == goal_id for a in pending_actions.values())
+    if not still_pending_for_goal and len(goal_id) == 36:
+        try:
+            await anyio.to_thread.run_sync(
+                lambda: store.update("goals", {"id": f"eq.{goal_id}"}, {"status": goal_status})
+            )
+        except Exception:
+            pass
+    if pending_actions:
+        await bus.set_orb("waiting", "Still waiting on your approval", ["assistant"])
+    else:
+        await bus.set_orb("idle", "Sonnet standing by", [])
+    return outcome
 
 
 # ── one-task-at-a-time serialization ────────────────────────────────────────

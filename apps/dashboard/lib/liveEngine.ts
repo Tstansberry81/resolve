@@ -172,7 +172,9 @@ export class LiveEngine {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision }),
-    });
+      // pull fresh goal/orb state so the sidebar mission clears out of
+      // "awaiting you" instead of waiting for the 30s poll
+    }).then(() => setTimeout(() => void this.loadSnapshot(), 1200));
     // optimistic local update; authoritative events follow on the stream
     this.commit({
       approvals: this.state.approvals.map((a) => (a.id === id ? { ...a, status: decision } : a)),
