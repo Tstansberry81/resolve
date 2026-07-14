@@ -236,12 +236,12 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "edit_google_doc",
-        "description": "Append Markdown content to an existing Google Doc. Get the document_id from create_google_doc or find_google_file.",
+        "description": "Append text to the end of an existing Google Doc (plain text). Get the document_id from create_google_doc or find_google_file.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "document_id": {"type": "string", "description": "The Google Doc id"},
-                "content": {"type": "string", "description": "Markdown to append"},
+                "content": {"type": "string", "description": "Text to append to the end of the doc"},
                 "name": {"type": "string", "description": "Optional doc name for the activity log"},
             },
             "required": ["document_id", "content"],
@@ -250,13 +250,13 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "edit_google_sheet",
-        "description": "Write rows into an existing Google Sheet. Get the spreadsheet_id from create_google_sheet or find_google_file.",
+        "description": "Append rows to an existing Google Sheet. Get the spreadsheet_id from create_google_sheet or find_google_file.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "spreadsheet_id": {"type": "string", "description": "The spreadsheet id"},
-                "rows": {"type": "array", "description": "Rows as an array of arrays.", "items": {"type": "array", "items": {"type": "string"}}},
-                "range": {"type": "string", "description": "Optional A1 range (e.g. 'Sheet1!A1'). Defaults to Sheet1 from A1."},
+                "rows": {"type": "array", "description": "Rows to append, as an array of arrays.", "items": {"type": "array", "items": {"type": "string"}}},
+                "sheet": {"type": "string", "description": "Optional tab name (defaults to Sheet1)."},
                 "name": {"type": "string", "description": "Optional sheet name for the activity log"},
             },
             "required": ["spreadsheet_id", "rows"],
@@ -279,7 +279,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "delete_google_file",
-        "description": "Delete (move to trash — recoverable) a file in Trav's Google Drive by id. Get the file_id from find_google_file first. Requires Trav's approval.",
+        "description": "Permanently delete a file in Trav's Google Drive by id (irreversible). Get the file_id from find_google_file first. Requires Trav's approval before it runs.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -326,7 +326,7 @@ How you operate:
   Write real content (Markdown), not placeholders, and give Trav the returned link.
   To change an existing file, call find_google_file to get its id, then edit_google_doc /
   edit_google_sheet / add_google_slides. To remove one, find it then delete_google_file
-  (it trashes the file and asks for Trav's approval first).
+  (permanent delete — it asks for Trav's approval first).
 - Keep replies tight — a sentence or a short paragraph. Humor is welcome; padding is not.
 - For complex multi-step requests (several distinct actions, research projects, bulk work),
   call plan_project ONCE with the full objective. The Planner (Opus 4.8) plans it, the Opus

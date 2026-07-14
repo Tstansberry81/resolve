@@ -90,7 +90,7 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         _log_gdrive_artifact({**res, "title": args.get("name", "Google Doc")}, action="updated")
         return res
     if name == "edit_google_sheet":
-        res = composio.edit_sheet(str(args["spreadsheet_id"]), args["rows"], args.get("range"))
+        res = composio.edit_sheet(str(args["spreadsheet_id"]), args["rows"], args.get("sheet"))
         _log_gdrive_artifact({**res, "title": args.get("name", "Google Sheet")}, action="updated")
         return res
     if name == "add_google_slides":
@@ -98,7 +98,7 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         _log_gdrive_artifact({**res, "title": args.get("name", "Google Slides")}, action="updated")
         return res
     if name == "delete_google_file":
-        return composio.trash_file(str(args["file_id"]))
+        return composio.delete_file(str(args["file_id"]))
     raise ValueError(f"unknown tool {name}")
 
 

@@ -60,7 +60,13 @@ def execute(tool_slug: str, arguments: dict) -> dict:
     body = r.json()
     if not body.get("successful", body.get("success", False)):
         raise RuntimeError(f"Composio {tool_slug} failed: {str(body.get('error'))[:200]}")
-    return body.get("data") or {}
+    data = body.get("data") or {}
+    # the v3 execute API sometimes nests the real payload under response_data
+    # (and uses snake_case); flatten it so callers see one consistent shape
+    inner = data.get("response_data")
+    if isinstance(inner, dict):
+        data = {**data, **inner}
+    return data
 
 
 def _col_letter(n: int) -> str:
@@ -95,19 +101,23 @@ def create_sheet(title: str, rows: list[list] | None = None) -> dict:
     )
     wrote = 0
     if rows and sid:
-        ncols = max((len(r) for r in rows), default=0)
-        rng = f"Sheet1!A1:{_col_letter(max(ncols, 1))}{len(rows)}"
-        execute(
-            "GOOGLESHEETS_VALUES_UPDATE",
-            {
-                "spreadsheet_id": sid,
-                "range": rng,
-                "value_input_option": "USER_ENTERED",
-                "values": rows,
-            },
-        )
+        _sheet_append(sid, "Sheet1", rows)
         wrote = len(rows)
     return {"url": url, "id": sid, "title": title, "rowsWritten": wrote}
+
+
+def _sheet_append(spreadsheet_id: str, sheet: str, rows: list[list]) -> None:
+    # VALUES_UPDATE isn't available on this deployment; APPEND is. camelCase args.
+    execute(
+        "GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND",
+        {
+            "spreadsheetId": spreadsheet_id,
+            "range": sheet,
+            "valueInputOption": "USER_ENTERED",
+            "insertDataOption": "INSERT_ROWS",
+            "values": rows,
+        },
+    )
 
 
 def create_slides(title: str, markdown_text: str) -> dict:
@@ -143,27 +153,21 @@ def find_file(query: str, limit: int = 8) -> dict:
     }
 
 
-def edit_doc(document_id: str, markdown_text: str) -> dict:
-    """Append Markdown to an existing Google Doc."""
-    data = execute(
-        "GOOGLEDOCS_UPDATE_DOCUMENT_SECTION_MARKDOWN",
-        {"document_id": document_id, "markdown_text": markdown_text},
-    )
-    did = data.get("documentId") or document_id
-    url = data.get("display_url") or f"https://docs.google.com/document/d/{did}/edit"
-    return {"url": url, "id": did}
-
-
-def edit_sheet(spreadsheet_id: str, rows: list[list], cell_range: str | None = None) -> dict:
-    """Write rows into a Google Sheet (defaults to Sheet1 from A1)."""
-    if not cell_range:
-        ncols = max((len(r) for r in rows), default=1)
-        cell_range = f"Sheet1!A1:{_col_letter(max(ncols, 1))}{len(rows)}"
+def edit_doc(document_id: str, text: str) -> dict:
+    """Append text to the end of an existing Google Doc (plain text). This
+    deployment requires insertion_index even for append; append_to_end wins, so
+    the index is a placeholder."""
     execute(
-        "GOOGLESHEETS_VALUES_UPDATE",
-        {"spreadsheet_id": spreadsheet_id, "range": cell_range,
-         "value_input_option": "USER_ENTERED", "values": rows},
+        "GOOGLEDOCS_INSERT_TEXT_ACTION",
+        {"document_id": document_id, "text_to_insert": text,
+         "append_to_end": True, "insertion_index": 1},
     )
+    return {"url": f"https://docs.google.com/document/d/{document_id}/edit", "id": document_id}
+
+
+def edit_sheet(spreadsheet_id: str, rows: list[list], sheet: str | None = None) -> dict:
+    """Append rows to a Google Sheet (defaults to the Sheet1 tab)."""
+    _sheet_append(spreadsheet_id, sheet or "Sheet1", rows)
     return {"url": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit",
             "id": spreadsheet_id, "rowsWritten": len(rows)}
 
@@ -178,8 +182,7 @@ def add_slides(presentation_id: str, markdown_text: str) -> dict:
             "id": presentation_id}
 
 
-def trash_file(file_id: str) -> dict:
-    """Move a Drive file to trash (soft delete — recoverable)."""
-    data = execute("GOOGLEDRIVE_TRASH_FILE", {"file_id": file_id})
-    return {"trashed": True, "id": data.get("id", file_id),
-            "name": data.get("name", ""), "url": data.get("display_url", "")}
+def delete_file(file_id: str) -> dict:
+    """Permanently delete a Drive file (irreversible — approval-gated upstream)."""
+    execute("GOOGLEDRIVE_GOOGLE_DRIVE_DELETE_FOLDER_OR_FILE_ACTION", {"fileId": file_id})
+    return {"deleted": True, "id": file_id}
