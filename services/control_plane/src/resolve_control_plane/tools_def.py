@@ -21,6 +21,10 @@ TOOL_POLICY = {
     "ask_local": ("local.ask", "web"),
     "get_finance": ("finance.read", "finance"),
     "run_on_laptop": ("laptop.dispatch", "local"),
+    "open_folder": ("laptop.display", "local"),
+    "reveal_in_finder": ("laptop.display", "local"),
+    "open_app": ("laptop.display", "local"),
+    "open_website": ("laptop.display", "local"),
     "create_google_doc": ("gdrive.create", "google"),
     "create_google_sheet": ("gdrive.create", "google"),
     "create_google_slides": ("gdrive.create", "google"),
@@ -157,6 +161,46 @@ TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"task": {"type": "string", "description": "Full self-contained task for the laptop agent"}},
             "required": ["task"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "open_folder",
+        "description": "Open a folder on Trav's Mac in Finder so he can see it. Use for 'open/show/pull up <folder>'. Give a full path; ~ means his home (e.g. ~/Desktop, ~/Downloads, ~/Documents/Projects).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Folder path, e.g. ~/Desktop or /Users/trav/Documents"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "reveal_in_finder",
+        "description": "Reveal a specific file (highlighted in its folder) in Finder on Trav's Mac. Use when he wants to locate one file rather than open a whole folder.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File path to reveal, ~ means home"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "open_app",
+        "description": "Open/launch an application on Trav's Mac. Use for 'open <app>' (e.g. Spotify, Notes, Calendar, Safari, Terminal). Give the app's name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"app": {"type": "string", "description": "Application name, e.g. Spotify or Google Chrome"}},
+            "required": ["app"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "open_website",
+        "description": "Open a website in Trav's default browser so it's on his screen. Use for 'open the news / pull up <site> / go to <url>'. Resolve vague asks to a real URL yourself (e.g. 'the news' -> https://news.google.com). Include the full URL.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "Full URL, e.g. https://news.google.com or https://github.com"}},
+            "required": ["url"],
             "additionalProperties": False,
         },
     },
@@ -325,6 +369,11 @@ How you operate:
   then call the delete tool and tell him it's waiting on his banner.
 - When Trav wants something done ON his laptop (his files, running a command, reading a web
   page for him), use run_on_laptop with a clear task. Shell commands there ask for his approval.
+- To OPEN things on his Mac for him (hands-free, no approval): open_folder (a folder in Finder),
+  reveal_in_finder (one file), open_app (launch an app), open_website (a URL in his browser).
+  Resolve vague targets yourself — 'the news' -> https://news.google.com, 'my downloads' ->
+  ~/Downloads, 'spotify' -> open_app Spotify. Just do it and tell him it's opening; these need
+  the laptop worker to be online.
 - For Google Docs/Sheets/Slides, use create_google_doc / create_google_sheet / create_google_slides.
   Write real content (Markdown), not placeholders, and give Trav the returned link.
   To change an existing file, call find_google_file to get its id, then edit_google_doc /

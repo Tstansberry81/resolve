@@ -108,6 +108,9 @@
     "laptop.dispatch": {
       "risk": "reversible_write"
     },
+    "laptop.display": {
+      "risk": "read"
+    },
     "gdrive.create": {
       "risk": "reversible_write"
     },

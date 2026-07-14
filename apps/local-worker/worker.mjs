@@ -18,7 +18,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 
 const CP = (process.env.CONTROL_PLANE_URL || "").replace(/\/$/, "");
 const CP_TOKEN = process.env.CP_TOKEN || "";
@@ -276,6 +276,37 @@ async function runTask(taskId, task) {
   return summary;
 }
 
+// ── structured "open" actions (folders / apps / websites) ───────────────────
+// Safe, non-destructive display actions dispatched straight from the cloud — no
+// LLM, no approval. Uses macOS `open` via execFile (no shell, so no injection).
+function openCmd(action) {
+  const kind = String(action.kind || "");
+  let value = String(action.value || "").trim();
+  if ((kind === "folder" || kind === "file" || kind === "reveal") && value.startsWith("~")) {
+    value = path.join(os.homedir(), value.slice(1));
+  }
+  if (kind === "app") return { args: ["-a", value], label: `Opened ${value}` };
+  if (kind === "url") {
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) value = "https://" + value;
+    return { args: [value], label: `Opened ${value}` };
+  }
+  if (kind === "reveal") return { args: ["-R", value], label: `Revealed ${value} in Finder` };
+  return { args: [value], label: `Opened ${value}` }; // folder / file
+}
+
+async function runOpen(taskId, action) {
+  const { args, label } = openCmd(action);
+  await emit(taskId, label);
+  const out = await new Promise((resolve) => {
+    execFile("open", args, { timeout: 15000 }, (err, _stdout, stderr) => {
+      if (err) resolve(`Couldn't open "${action.value}": ${(stderr || err.message).slice(0, 200)}`);
+      else resolve(label);
+    });
+  });
+  await cp("/v1/local/result", { method: "POST", body: JSON.stringify({ taskId, summary: out }) }).catch(() => {});
+  return out;
+}
+
 // ── main poll loop ──────────────────────────────────────────────────────────
 async function main() {
   if (!CP) throw new Error("CONTROL_PLANE_URL not set");
@@ -283,10 +314,15 @@ async function main() {
   console.log(`RESOLVE local worker online. workspace=${ROOT} control-plane=${CP}`);
   for (;;) {
     try {
-      const job = await cp("/v1/local/next"); // { taskId, task } or null
+      const job = await cp("/v1/local/next"); // { taskId, task, action? } or null
       if (job && job.taskId) {
-        console.log(`> task ${job.taskId}: ${String(job.task).slice(0, 80)}`);
-        await runTask(job.taskId, job.task).catch((e) => console.error("task failed", e));
+        if (job.action) {
+          console.log(`> open ${job.taskId}: ${job.action.kind} ${String(job.action.value).slice(0, 80)}`);
+          await runOpen(job.taskId, job.action).catch((e) => console.error("open failed", e));
+        } else {
+          console.log(`> task ${job.taskId}: ${String(job.task).slice(0, 80)}`);
+          await runTask(job.taskId, job.task).catch((e) => console.error("task failed", e));
+        }
       } else {
         await new Promise((r) => setTimeout(r, 3000));
       }

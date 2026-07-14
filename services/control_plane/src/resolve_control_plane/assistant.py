@@ -108,6 +108,22 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "run_on_laptop":
         from . import local
         return local.enqueue(str(args["task"]))
+    if name == "open_folder":
+        from . import local
+        p = str(args["path"])
+        return local.enqueue_action("folder", p, f"Opening {p} in Finder")
+    if name == "reveal_in_finder":
+        from . import local
+        p = str(args["path"])
+        return local.enqueue_action("reveal", p, f"Revealing {p} in Finder")
+    if name == "open_app":
+        from . import local
+        a = str(args["app"])
+        return local.enqueue_action("app", a, f"Opening {a}")
+    if name == "open_website":
+        from . import local
+        u = str(args["url"])
+        return local.enqueue_action("url", u, f"Opening {u}")
     if name == "create_google_doc":
         res = composio.create_doc(str(args["title"]), str(args.get("content", "")),
                                   folder=args.get("folder") or None)

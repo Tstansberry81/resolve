@@ -32,6 +32,16 @@ def enqueue(task: str) -> dict[str, Any]:
     return {"taskId": task_id, "queued": True, "workerOnline": online()}
 
 
+def enqueue_action(kind: str, value: str, label: str) -> dict[str, Any]:
+    """Enqueue a structured 'open' action the worker runs directly (no LLM, no
+    approval — opening a folder/app/url is safe and non-destructive)."""
+    task_id = str(uuid.uuid4())
+    _queue.append({"taskId": task_id, "task": label,
+                   "action": {"kind": kind, "value": value}})
+    return {"taskId": task_id, "queued": True, "workerOnline": online(),
+            "dispatched": label if online() else None}
+
+
 def next_task() -> dict[str, Any] | None:
     global _last_poll
     _last_poll = time.time()
