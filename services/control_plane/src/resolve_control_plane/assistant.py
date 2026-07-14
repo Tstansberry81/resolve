@@ -63,6 +63,9 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "delete_calendar_event":
         return gcal.delete_event(str(args["event_id"]))
     if name == "ask_local":
+        if not executor.local_exec:
+            return ("The local model is OFF. Don't use it — do this yourself or with the "
+                    "other tools. (Trav turns it on with the exec toggle.)")
         return local_llm.chat(str(args["prompt"]))
     if name == "get_finance":
         s = simplefin.summary(int(args.get("days", 30)))
@@ -280,6 +283,9 @@ async def _loop(goal_id: str, text: str) -> None:
         messages.append({"role": "user", "content": prior_user})
         messages.append({"role": "assistant", "content": prior_reply})
     messages.append({"role": "user", "content": text})
+    # Only offer the local-model tool when the exec toggle is on — otherwise
+    # Sonnet must never route to Qwen (it's likely offline and it's opt-in).
+    active_tools = TOOLS if executor.local_exec else [t for t in TOOLS if t["name"] != "ask_local"]
     final_text = ""
     try:
         for _ in range(MAX_TURNS):
@@ -287,7 +293,7 @@ async def _loop(goal_id: str, text: str) -> None:
                 model=ASSISTANT_MODEL,
                 max_tokens=1500,
                 system=system,
-                tools=TOOLS,
+                tools=active_tools,
                 messages=messages,
             )
             costs.record("assistant", ASSISTANT_MODEL, resp.usage)

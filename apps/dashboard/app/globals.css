@@ -1096,7 +1096,9 @@ a.artifact-link:hover {
   flex: none;
   display: flex;
   align-items: center;
-  padding: 0 14px 0 4px;
+  /* bottom padding lifts the centered chat above the artifacts dock so it
+     doesn't get covered (dock is ~172px + 16px inset, bottom-right) */
+  padding: 0 14px 210px 4px;
   overflow: hidden;
 }
 
