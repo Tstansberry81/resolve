@@ -29,6 +29,8 @@ function toBubbles(events: AgentEvent[]): Bubble[] {
       // prefer the full command in detail; fall back to the (truncated) summary
       const full = (e.detail && e.detail.trim()) || e.summary.replace(/^Goal accepted: /, "");
       out.push({ id: e.id, who: "you", text: full });
+    } else if (e.type === "goal.queued") {
+      out.push({ id: e.id, who: "sonnet", text: e.summary });
     } else if (e.type === "assistant.reply") {
       out.push({ id: e.id, who: "sonnet", text: e.detail ?? e.summary });
     }

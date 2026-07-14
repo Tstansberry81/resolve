@@ -298,8 +298,47 @@ async def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
         return {"ok": True, "executed": False, "error": str(exc)}
 
 
+# ── one-task-at-a-time serialization ────────────────────────────────────────
+# Everything runs through a single-consumer queue: the current task ALWAYS
+# finishes before the next starts, so a stray mic pickup (or a second command)
+# can never interrupt what's already running — it just waits its turn.
+_cmd_queue: "asyncio.Queue[tuple[str, str]] | None" = None
+_processor: "asyncio.Task | None" = None
+_current_goal: str | None = None
+
+
+def _ensure_processor() -> None:
+    global _cmd_queue, _processor
+    if _cmd_queue is None:
+        _cmd_queue = asyncio.Queue()
+    if _processor is None or _processor.done():
+        _processor = asyncio.get_running_loop().create_task(_command_processor())
+
+
+async def _command_processor() -> None:
+    global _current_goal
+    assert _cmd_queue is not None
+    while True:
+        goal_id, text = await _cmd_queue.get()
+        _current_goal = goal_id
+        try:
+            await _loop(goal_id, text)
+        except Exception:
+            log.exception("command processing failed")
+        finally:
+            _current_goal = None
+            _cmd_queue.task_done()
+
+
+def queue_status() -> dict[str, Any]:
+    """What's running now and how many are waiting — for the snapshot/UI."""
+    return {"running": _current_goal is not None,
+            "queued": _cmd_queue.qsize() if _cmd_queue is not None else 0}
+
+
 async def run_command(text: str) -> str:
-    """Run one assistant command; returns the goal id. Emits everything via the bus."""
+    """Accept a command; returns the goal id. Runs are SERIALIZED — if one is
+    already in flight, this waits in line and never interrupts it."""
     goal_row = {
         "objective": text[:300],
         "category": "personal",
@@ -314,19 +353,25 @@ async def run_command(text: str) -> str:
     except Exception:
         goal_id = str(uuid.uuid4())
 
-    asyncio.get_running_loop().create_task(_loop(goal_id, text))
+    _ensure_processor()
+    busy = _current_goal is not None
+    # show the user's message immediately (even while it waits in line)
+    await bus.emit("assistant", "goal.accepted", f"Goal accepted: {text[:120]}",
+                   detail=text, goal_id=goal_id)
+    if busy:
+        await bus.emit(
+            "assistant", "goal.queued",
+            "Queued — I'll finish what I'm doing first, then get to this.",
+            detail=text, goal_id=goal_id,
+        )
+    await _cmd_queue.put((goal_id, text))
     return goal_id
 
 
 async def _loop(goal_id: str, text: str) -> None:
+    # goal.accepted is emitted in run_command (so it shows immediately, even when
+    # queued). Here we just flip the orb busy as this task actually starts.
     client = anthropic.AsyncAnthropic()
-    await bus.set_orb("listening", "Sonnet heard you — parsing the request", ["assistant"])
-    await bus.emit(
-        # summary stays short for the compact event feed; detail carries the FULL
-        # command so the chat bubble can show everything (no more cut-off messages)
-        "assistant", "goal.accepted", f"Goal accepted: {text[:120]}",
-        detail=text, goal_id=goal_id,
-    )
     await bus.set_orb("thinking", "Sonnet is working your request", ["assistant"])
 
     now = datetime.now(ZoneInfo("America/New_York"))

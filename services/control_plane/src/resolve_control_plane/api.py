@@ -11,7 +11,9 @@ from pydantic import BaseModel
 
 from . import __version__, artifacts, bus, costs, executor, local, routines, store
 from .connectors import local_llm, simplefin
-from .assistant import CONNECTOR_AVAILABLE, decide_approval, pending_actions, run_command
+from .assistant import (
+    CONNECTOR_AVAILABLE, decide_approval, pending_actions, queue_status, run_command,
+)
 from .config import load_json, model_choice
 
 app = FastAPI(title="RESOLVE Control Plane", version=__version__)
@@ -132,6 +134,7 @@ async def snapshot() -> dict:
         "artifacts": artifacts.recent(),
         "connectors": _connector_health(),
         "pendingApprovals": len(pending_actions),
+        "taskQueue": queue_status(),
         "costs": costs.snapshot(),
         "localExec": executor.local_exec,
         "localAvailable": local_llm.configured(),
