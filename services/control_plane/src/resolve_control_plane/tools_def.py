@@ -24,6 +24,7 @@ TOOL_POLICY = {
     "run_on_laptop": ("laptop.dispatch", "local"),
     "open_folder": ("laptop.display", "local"),
     "reveal_in_finder": ("laptop.display", "local"),
+    "open_file": ("laptop.display", "local"),
     "open_app": ("laptop.display", "local"),
     "open_website": ("laptop.display", "local"),
     "create_google_doc": ("gdrive.create", "google"),
@@ -181,6 +182,16 @@ TOOLS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {"path": {"type": "string", "description": "File path to reveal, ~ means home"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "open_file",
+        "description": "Open a file on Trav's Mac with its default app (e.g. a PDF in Preview, a doc in its editor). Use for 'open <file>'. Give the full path; ~ is home.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File path to open, ~ means home"}},
             "required": ["path"],
             "additionalProperties": False,
         },

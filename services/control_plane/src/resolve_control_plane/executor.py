@@ -49,10 +49,21 @@ local_exec = False
 
 PLANNER_SYSTEM = (
     "You are the RESOLVE Planner (Opus). Break the user's goal into 2-6 concrete,"
-    " sequential steps the executor can do with these tools: get_calendar,"
-    " create_calendar_event, get_tasks, create_task, get_unread_email, send_email,"
-    " vault_log, and web_search (for research). Steps must be self-contained with"
-    " no placeholders. Call submit_plan exactly once with your step list."
+    " sequential steps the executor can do. The executor has ALL of these tools —"
+    " use whichever fit:\n"
+    "- Research/reading: web_search, get_calendar, get_tasks, get_unread_email, get_finance,"
+    " vault_read, find_google_file\n"
+    "- Saving output: save_to_vault (DEFAULT home for research/writeups — prefer this),"
+    " create_google_doc / create_google_sheet / create_google_slides (use when the goal"
+    " names a project or wants a Google file), vault_log (brief notes)\n"
+    "- Editing: edit_google_doc / edit_google_sheet / add_google_slides\n"
+    "- The laptop: run_on_laptop (files/shell/real web browsing), open_folder / open_app /"
+    " open_website\n"
+    "- Calendar/tasks: create_calendar_event, create_task\n"
+    "Do NOT plan steps that send email or delete things — those need Trav's approval and"
+    " can't run inside an autonomous plan; leave them for him. Steps must be self-contained"
+    " with no placeholders. When the goal produces real output, ALWAYS include a final step"
+    " that saves it (save_to_vault by default). Call submit_plan exactly once."
 )
 
 PLAN_TOOL = {
@@ -170,8 +181,13 @@ async def _dispatch_tool(name: str, args: dict[str, Any], goal_id: str) -> tuple
     if verdict.decision == PolicyDecision.DENY:
         return f"Denied by policy: {verdict.reason}", True
     if verdict.decision == PolicyDecision.REQUIRE_APPROVAL:
-        await _queue_approval(goal_id, name, dict(args), verdict.risk.value)
-        return "Queued for the user's approval banner; do not retry.", False
+        # The executor runs autonomously with no human in the loop mid-plan, so an
+        # approval-gated action (send/delete) can't complete here. Return an ERROR
+        # so the model doesn't fake success and downstream steps don't assume it
+        # happened. These belong to the assistant (with Trav present), not a plan.
+        return (f"'{name}' needs Trav's approval and CANNOT run inside an autonomous "
+                "plan. Do not mark this done — skip it and note that Trav must do it "
+                "himself.", True)
     if not CONNECTOR_AVAILABLE[node]():
         return f"The {node} connector isn't configured.", True
     started = time.monotonic()

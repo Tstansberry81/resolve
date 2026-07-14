@@ -108,11 +108,34 @@ def list_tree(prefix: str = "wiki/") -> dict:
 
 
 def search_files(query: str) -> dict:
-    """List vault file paths whose name contains the query (case-insensitive)."""
-    url = f"https://api.github.com/repos/{VAULT_REPO}/git/trees/main?recursive=1"
-    r = requests.get(url, headers=_headers(), timeout=20)
-    r.raise_for_status()
-    q = query.lower()
-    paths = [t["path"] for t in r.json().get("tree", [])
-             if t.get("type") == "blob" and q in t["path"].lower()]
-    return {"matches": paths[:30]}
+    """Search the vault by FILENAME and by CONTENT (GitHub code search). Content
+    search is best-effort (needs indexing); filename always works."""
+    q = (query or "").strip()
+    ql = q.lower()
+    by_name: list[str] = []
+    try:
+        url = f"https://api.github.com/repos/{VAULT_REPO}/git/trees/main?recursive=1"
+        r = requests.get(url, headers=_headers(), timeout=20)
+        r.raise_for_status()
+        by_name = [t["path"] for t in r.json().get("tree", [])
+                   if t.get("type") == "blob" and ql in t["path"].lower()]
+    except Exception:
+        pass
+    by_content: list[str] = []
+    try:
+        sr = requests.get(
+            "https://api.github.com/search/code",
+            headers=_headers(), params={"q": f"{q} repo:{VAULT_REPO}", "per_page": 20},
+            timeout=20,
+        )
+        if sr.status_code == 200:
+            by_content = [it.get("path", "") for it in sr.json().get("items", []) if it.get("path")]
+    except Exception:
+        pass
+    seen: set[str] = set()
+    merged: list[str] = []
+    for p in by_name + by_content:  # filename hits first
+        if p and p not in seen:
+            seen.add(p)
+            merged.append(p)
+    return {"matches": merged[:30], "byName": by_name[:15], "byContent": by_content[:15]}

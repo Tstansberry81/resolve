@@ -146,6 +146,10 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         from . import local
         p = str(args["path"])
         return local.enqueue_action("reveal", p, f"Revealing {p} in Finder")
+    if name == "open_file":
+        from . import local
+        p = str(args["path"])
+        return local.enqueue_action("file", p, f"Opening {p}")
     if name == "open_app":
         from . import local
         a = str(args["app"])
@@ -423,11 +427,27 @@ async def stop_current() -> dict[str, Any]:
     if _current_task is not None and not _current_task.done():
         _current_task.cancel()
         cancelled = True
+    # 4) cancel any pending approvals — "stop" means the queued send/delete does
+    #    NOT get to fire later if Trav taps approve
+    dropped_approvals = 0
+    for aid, act in list(pending_actions.items()):
+        pending_actions.pop(aid, None)
+        dropped_approvals += 1
+        bus._fanout({"kind": "approval", "approval": {
+            "id": aid, "goalId": act.get("goal_id", ""),
+            "actionSummary": act.get("summary", ""), "risk": act.get("risk", ""),
+            "preview": [], "status": "rejected"}})
+        try:
+            await anyio.to_thread.run_sync(
+                lambda a=aid: store.update("approvals", {"id": f"eq.{a}"}, {"status": "rejected"}))
+        except Exception:
+            pass
     await bus.set_orb("idle", "Stopped — standing by", [])
     await bus.emit("assistant", "system.stopped",
                    "Stopped. Cancelled the running task and cleared the queue.",
                    level="warn")
-    return {"cancelledAssistant": cancelled, "droppedQueued": dropped_cmds, **ex_result}
+    return {"cancelledAssistant": cancelled, "droppedQueued": dropped_cmds,
+            "cancelledApprovals": dropped_approvals, **ex_result}
 
 
 async def run_command(text: str) -> str:
@@ -601,7 +621,7 @@ async def _loop(goal_id: str, text: str) -> None:
                          "content": json.dumps(plan_result, default=str)[:2000]}
                     )
                     continue
-                if not CONNECTOR_AVAILABLE[node]():
+                if not CONNECTOR_AVAILABLE.get(node, lambda: True)():
                     if node == "local":
                         msg = (
                             "Trav's laptop worker is OFFLINE, so this can't run right now. "
@@ -611,6 +631,9 @@ async def _loop(goal_id: str, text: str) -> None:
                             "(or, if that doesn't work: `cd ~/claude/resolve/apps/local-worker "
                             "&& ./run.sh`). Once it's back, ask me again."
                         )
+                    elif node == "web":
+                        msg = ("The local model isn't reachable (LOCAL_MODEL_URL not set or the "
+                               "box is offline). Answer it yourself instead.")
                     else:
                         msg = f"The {node} connector isn't configured on this deployment yet."
                     results.append(
@@ -626,7 +649,7 @@ async def _loop(goal_id: str, text: str) -> None:
                 started = time.monotonic()
                 try:
                     result = await anyio.to_thread.run_sync(
-                        lambda: _connector_call(tu.name, dict(tu.input))
+                        lambda n=tu.name, inp=dict(tu.input): _connector_call(n, inp)
                     )
                     ms = int((time.monotonic() - started) * 1000)
                     await bus.emit(
@@ -680,10 +703,17 @@ async def _loop(goal_id: str, text: str) -> None:
             await bus.set_orb("waiting", "Sonnet is waiting on your approval", ["assistant"])
         else:
             await bus.set_orb("idle", "Sonnet standing by", [])
+    except asyncio.CancelledError:
+        raise  # a 'stop' — let the processor handle it, no error reply
     except Exception as exc:
         log.exception("assistant loop failed")
         await bus.emit("core", "goal.failed", f"Assistant loop error: {exc}", level="error",
                        goal_id=goal_id)
+        # give Trav an actual reply instead of a silent failure + idle orb
+        await bus.emit("assistant", "assistant.reply",
+                       "Something went wrong on my end and I couldn't finish that — try again?",
+                       detail=f"error: {exc}", level="error", goal_id=goal_id)
+        await bus.set_orb("idle", "Sonnet standing by", [])
         try:
             await anyio.to_thread.run_sync(
                 lambda: store.update("goals", {"id": f"eq.{goal_id}"}, {"status": "failed"})
