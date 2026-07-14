@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections import deque
@@ -29,7 +30,27 @@ from .tools_def import SYSTEM, TOOL_POLICY, TOOLS
 log = logging.getLogger("resolve.assistant")
 
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-sonnet-4-6")
-MAX_TURNS = 6
+MAX_TURNS = 8
+
+# Language that means "I'm about to act" — if the model ENDS its turn with this
+# but never called a tool, it's hallucinating the work. We nudge it to actually
+# do it instead of letting the promise be the final answer.
+_PROMISE_RE = re.compile(
+    r"\b(creating|making|building|setting up|working on|generating|drafting|"
+    r"putting together|pulling (?:that|it) up|i'?ll|i will|let me|give me a|"
+    r"one (?:sec|second|moment)|on it|hang on|hold on|getting (?:that|it)|"
+    r"will (?:create|make|do|set|send|add|update|draft|delete|find|check))\b",
+    re.I,
+)
+
+
+def _sounds_like_promise(text: str) -> bool:
+    """True if the reply announces intent instead of reporting a result. A
+    trailing question is a clarification, which is allowed."""
+    t = (text or "").strip()
+    if not t or t.rstrip().endswith("?"):
+        return False
+    return bool(_PROMISE_RE.search(t))
 
 def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "get_calendar":
@@ -287,6 +308,8 @@ async def _loop(goal_id: str, text: str) -> None:
     # Sonnet must never route to Qwen (it's likely offline and it's opt-in).
     active_tools = TOOLS if executor.local_exec else [t for t in TOOLS if t["name"] != "ask_local"]
     final_text = ""
+    tools_ran = False   # did any tool actually execute this request?
+    nudges = 0          # anti-hallucination re-prompts used
     try:
         for _ in range(MAX_TURNS):
             resp = await client.messages.create(
@@ -302,8 +325,22 @@ async def _loop(goal_id: str, text: str) -> None:
             if texts:
                 final_text = texts[-1]
             if resp.stop_reason != "tool_use" or not tool_uses:
+                # It ended its turn without calling a tool. If it never actually
+                # did anything yet AND it's talking like it's about to, that's a
+                # hallucination — force it to act instead of accepting the promise.
+                if not tool_uses and not tools_ran and nudges < 2 and _sounds_like_promise(final_text):
+                    nudges += 1
+                    messages.append({"role": "assistant", "content": resp.content})
+                    messages.append({"role": "user", "content":
+                        "You replied as if you were about to do it, but you didn't call any "
+                        "tool — so nothing happened. Do NOT describe what you're about to do. "
+                        "Call the tool NOW to actually complete the task, or ask one specific "
+                        "clarifying question. Only give a final answer once it's done, with the "
+                        "real result (e.g. the link)."})
+                    continue
                 break
 
+            tools_ran = True
             messages.append({"role": "assistant", "content": resp.content})
             results = []
             for tu in tool_uses:

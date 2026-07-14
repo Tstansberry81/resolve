@@ -17,7 +17,10 @@ export type ConnectorId =
   | "notion"
   | "github"
   | "canvas"
-  | "web";
+  | "web"
+  | "google"
+  | "local"
+  | "finance";
 
 export type NodeId = AgentId | ConnectorId;
 

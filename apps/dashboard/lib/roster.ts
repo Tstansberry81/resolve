@@ -58,8 +58,9 @@ export const CONNECTORS: { id: ConnectorId; label: string }[] = [
   { id: "gmail", label: "Gmail" },
   { id: "calendar", label: "Calendar" },
   { id: "notion", label: "Notion" },
-  { id: "github", label: "GitHub" },
-  { id: "canvas", label: "Canvas" },
+  { id: "google", label: "Google" },
+  { id: "finance", label: "Finance" },
+  { id: "local", label: "Laptop" },
   { id: "web", label: "Web" },
 ];
 
