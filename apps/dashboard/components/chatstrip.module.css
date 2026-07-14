@@ -51,6 +51,16 @@
   word-break: break-word;
 }
 
+.link {
+  color: var(--cyan, #3ee0ff);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+.link:hover {
+  color: #7fe9ff;
+}
+
 .bubbleYou {
   background: var(--blue-dim, rgba(90, 140, 255, 0.14));
   border: 1px solid rgba(90, 140, 255, 0.35);

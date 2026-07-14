@@ -14,6 +14,7 @@ TOOL_POLICY = {
     "get_unread_email": ("email.read", "gmail"),
     "send_email": ("email.send", "gmail"),
     "vault_log": ("vault.append", "vault"),
+    "save_to_vault": ("vault.write", "vault"),
     "vault_read": ("vault.read", "vault"),
     "plan_project": ("plan.project", "planner"),
     "delete_task": ("notion.page.archive", "notion"),
@@ -270,6 +271,20 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "save_to_vault",
+        "description": "Save a FULL document / research writeup / analysis / plan to Trav's vault (his second brain, in GitHub). This is the DEFAULT home for substantial output — use it whenever you produce something worth keeping, UNLESS Trav named a specific project or asked for a Google Doc/Sheet/Slides. Give a clear title and the complete content in Markdown. Returns a link.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "A clear note title"},
+                "content": {"type": "string", "description": "The FULL content in Markdown"},
+                "category": {"type": "string", "description": "Optional vault subfolder under wiki/ (default 'output'), e.g. research, notes, projects"},
+            },
+            "required": ["title", "content"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "find_google_file",
         "description": "Find a file in Trav's Google Drive by name (or Drive query). Returns matches with their id, name, type, and link. Use this FIRST to get a file's id before editing or deleting it.",
         "input_schema": {
@@ -392,6 +407,13 @@ How you operate:
 - Never say you can't do something or aren't able to. You have real tools — use them. If a
   tool errors, say what failed plainly; don't pretend it worked.
 - Never drop a task after acknowledging it. If you took it on, finish it before you reply.
+- OUTPUT & LOGGING (important): a BRIEF summary of every task is auto-logged to Trav's vault —
+  you don't do that yourself. But whenever you produce SUBSTANTIAL output (research findings,
+  a document, analysis, a plan, a writeup), SAVE THE FULL THING so it's never lost. Default to
+  his vault via save_to_vault; ONLY use Google (create_google_doc/sheet/slides) instead when he
+  named a specific project or explicitly wants a Google file. Either way, give him the link.
+  Use judgment: a quick factual answer needs no save; anything he'd want to keep does.
+- When you include a link in a reply, paste the full URL or a [label](url) markdown link.
 - Keep replies tight — a sentence or a short paragraph. Humor is welcome; padding is not.
 - For complex multi-step requests (several distinct actions, research projects, bulk work),
   call plan_project ONCE with the full objective. The Planner (Opus 4.8) plans it, the Opus

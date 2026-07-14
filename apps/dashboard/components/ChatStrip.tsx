@@ -58,11 +58,42 @@ export function ChatStrip() {
         <div key={b.id} className={b.who === "you" ? styles.rowYou : styles.rowSonnet}>
           <div className={b.who === "you" ? styles.bubbleYou : styles.bubbleSonnet}>
             {b.who === "sonnet" && <span className={styles.tag}>RESOLVE</span>}
-            {b.text}
+            {renderRich(b.text)}
           </div>
         </div>
       ))}
       <div ref={endRef} />
     </div>
+  );
+}
+
+// Render chat text with clickable links ([label](url) and bare URLs) and **bold**.
+const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s]+)/g;
+
+function renderRich(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  LINK_RE.lastIndex = 0;
+  while ((m = LINK_RE.exec(text)) !== null) {
+    if (m.index > last) out.push(...renderBold(text.slice(last, m.index), key++));
+    const label = m[1];
+    const url = (m[2] || m[3] || "").replace(/[.,);]+$/, "");
+    out.push(
+      <a key={`l${key++}`} href={url} target="_blank" rel="noreferrer" className={styles.link}>
+        {label || url}
+      </a>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(...renderBold(text.slice(last), key++));
+  return out;
+}
+
+function renderBold(text: string, baseKey: number): React.ReactNode[] {
+  const parts = text.split(/\*\*([^*]+)\*\*/g);
+  return parts.map((p, i) =>
+    i % 2 === 1 ? <strong key={`b${baseKey}-${i}`}>{p}</strong> : p,
   );
 }

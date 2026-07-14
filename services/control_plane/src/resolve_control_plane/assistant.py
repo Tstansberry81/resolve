@@ -114,6 +114,9 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         return gmail_imap.send_email(args["to"], args["subject"], args["body"])
     if name == "vault_log":
         return vault_github.append_log(args["title"], list(args.get("lines", [])))
+    if name == "save_to_vault":
+        return _save_to_vault(str(args["title"]), str(args["content"]),
+                              str(args.get("category", "output")))
     if name == "vault_read":
         if args.get("path"):
             return vault_github.read_file(str(args["path"]))
@@ -183,6 +186,36 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "delete_google_file":
         return composio.delete_file(str(args["file_id"]))
     raise ValueError(f"unknown tool {name}")
+
+
+def _slug(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")
+    return (s[:60] or "note")
+
+
+def _save_to_vault(title: str, content: str, category: str = "output") -> dict[str, Any]:
+    """Write a FULL note/document to the vault (the default home for real output)."""
+    cat = re.sub(r"[^a-z0-9/_-]+", "", (category or "output").lower()) or "output"
+    path = f"wiki/{cat}/{_slug(title)}.md"
+    stamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M")
+    body = f"# {title}\n\n*saved by RESOLVE · {stamp}*\n\n{content.strip()}\n"
+    vault_github.write_file(path, body, message=f"agent: save {title[:60]}")
+    url = f"https://github.com/{vault_github.VAULT_REPO}/blob/main/{path}"
+    return {"saved": True, "path": path, "url": url, "title": title}
+
+
+def _log_task_summary(request: str, reply: str) -> None:
+    """Always-on: drop a BRIEF one-liner for every task into the vault log so
+    nothing goes untracked (the full artifact save is separate/case-by-case)."""
+    if not vault_github.configured():
+        return
+    r = " ".join((reply or "").split())[:280]
+    q = " ".join((request or "").split())[:200]
+    try:
+        vault_github.append_log(f"agent · {q[:60]}",
+                                [f"- **Asked:** {q}", f"- **Result:** {r or '(done)'}"])
+    except Exception:
+        pass  # logging must never break the reply
 
 
 def _log_gdrive_artifact(res: dict[str, Any], action: str = "created") -> None:
@@ -628,6 +661,11 @@ async def _loop(goal_id: str, text: str) -> None:
             "assistant", "assistant.reply", final_text[:160],
             detail=final_text or None, level="success", goal_id=goal_id,
         )
+        # always log a brief summary of the task to the vault (best-effort)
+        try:
+            await anyio.to_thread.run_sync(lambda: _log_task_summary(text, final_text))
+        except Exception:
+            pass
         try:
             await anyio.to_thread.run_sync(
                 lambda: store.update(

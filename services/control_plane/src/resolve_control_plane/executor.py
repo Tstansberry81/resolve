@@ -20,8 +20,10 @@ from typing import Any
 import anthropic
 import anyio
 
+import re
+
 from . import bus, costs, store
-from .connectors import local_llm
+from .connectors import local_llm, vault_github
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
 
@@ -285,9 +287,12 @@ async def _run_step(item: dict[str, Any]) -> None:
                    goal_id=goal_id)
 
     system = (
-        "You are the RESOLVE executor. Complete exactly this step of a larger"
-        f" plan, then summarize the outcome in one sentence.\nGoal: {item['objective']}\n"
-        f"Step: {title}\nInstructions: {item['instructions']}"
+        "You are the RESOLVE executor. Complete exactly this step of a larger plan."
+        " Give your FULL result as your final message — for research, that means the"
+        " actual findings written out (not just a one-line summary). RESOLVE saves"
+        " your output to Trav's vault automatically, so do NOT claim you saved it"
+        " yourself and don't skip writing the real content.\n"
+        f"Goal: {item['objective']}\nStep: {title}\nInstructions: {item['instructions']}"
     )
 
     outcome = ""
@@ -305,9 +310,37 @@ async def _run_step(item: dict[str, Any]) -> None:
     if backend != "local Qwen":
         outcome = await _execute_opus(item, system)
 
+    # GUARANTEE the output lands in the vault — deterministic, not up to the LLM.
+    saved_url = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome))
+
     await _mark_task(item["task_id"], "succeeded")
+    detail = outcome or None
+    if saved_url:
+        detail = f"{outcome}\n\nSaved to vault: {saved_url}"
     await bus.emit("executor", "task.completed", f"Done ({backend}): {title} — {outcome[:120]}",
-                   detail=outcome or None, level="success", goal_id=goal_id)
+                   detail=detail, level="success", goal_id=goal_id)
+
+
+def _autosave_output(title: str, outcome: str) -> str | None:
+    """Persist a step's output to the vault: a brief log line always, plus a full
+    note when there's substantial content. Best-effort; never breaks the step."""
+    if not vault_github.configured() or not (outcome or "").strip():
+        return None
+    brief = " ".join(outcome.split())[:200]
+    try:
+        vault_github.append_log(f"executor · {title[:60]}", [f"- {brief}"])
+    except Exception:
+        pass
+    if len(outcome.strip()) <= 300:
+        return None
+    slug = (re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60]) or "research"
+    path = f"wiki/output/{slug}.md"
+    try:
+        vault_github.write_file(path, f"# {title}\n\n{outcome.strip()}\n",
+                                message=f"agent: save {title[:50]}")
+        return f"https://github.com/{vault_github.VAULT_REPO}/blob/main/{path}"
+    except Exception:
+        return None
 
 
 def is_working() -> bool:
