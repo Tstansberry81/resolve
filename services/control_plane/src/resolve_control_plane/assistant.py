@@ -340,14 +340,20 @@ async def _loop(goal_id: str, text: str) -> None:
             texts = [b.text for b in resp.content if b.type == "text"]
             if texts:
                 final_text = texts[-1]
+            log.info("ASSISTANT stop=%s tools=%s ran=%s nudges=%d text=%r",
+                     resp.stop_reason, [b.name for b in tool_uses], tools_ran, nudges,
+                     (final_text or "")[:80])
             if resp.stop_reason != "tool_use" or not tool_uses:
                 # It ended without calling a tool. If NOTHING has actually run yet
                 # and either the request was actionable or the reply claims/promises
                 # work, that's a hallucination — force it to act (or ask), never let
                 # "Done." with no tool call be the final answer.
                 reply_is_question = final_text.rstrip().endswith("?")
-                if (not tool_uses and not tools_ran and nudges < 2 and not reply_is_question
-                        and (_looks_actionable(text) or _claims_action(final_text))):
+                _should = (not tool_uses and not tools_ran and nudges < 2 and not reply_is_question
+                           and (_looks_actionable(text) or _claims_action(final_text)))
+                log.info("ASSISTANT end-of-turn: should_nudge=%s (actionable=%s claims=%s q=%s)",
+                         _should, _looks_actionable(text), _claims_action(final_text), reply_is_question)
+                if _should:
                     nudges += 1
                     messages.append({"role": "assistant", "content": resp.content})
                     messages.append({"role": "user", "content":
