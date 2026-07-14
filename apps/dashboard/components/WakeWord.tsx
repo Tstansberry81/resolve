@@ -1,14 +1,16 @@
 "use client";
 
-// Always-on wake-word listener. Two engines, picked automatically:
-//  • Porcupine (Picovoice WASM) when NEXT_PUBLIC_PICOVOICE_ACCESS_KEY is set —
-//    reliable, low-CPU, stays armed indefinitely. The real Jarvis path.
-//  • Web Speech API otherwise — no key needed, but browser-flaky (restarts on
-//    silence, can miss the phrase).
-// Either way, on the wake word it flips voice conversation mode on: CommandCore
-// then listens for your command and ChatStrip speaks the replies. The mic is
-// single-instance, so while a conversation is active this listener steps aside
-// and re-arms when it ends.
+// Always-on wake-word listener. Engines, picked automatically in priority order:
+//  • openWakeWord (onnxruntime-web, on-device) — the default. Free, fully local,
+//    no key, stays armed indefinitely. Listens for "hey jarvis".
+//  • Porcupine (Picovoice) ONLY if NEXT_PUBLIC_PICOVOICE_ACCESS_KEY is set —
+//    kept as an option, but its free tier gates custom production wake words, so
+//    it's no longer the default.
+//  • Web Speech API — last-resort fallback (browser-flaky; dead in Electron).
+// On the wake word it flips voice conversation mode on: CommandCore then listens
+// for your command and ChatStrip speaks the replies. The mic is single-instance,
+// so while a conversation is active this listener steps aside and re-arms when it
+// ends.
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import {
@@ -21,6 +23,7 @@ import {
 } from "@/lib/voice";
 import { makeRecognition, speak, speechSupported, type SpeechRecognitionLike } from "@/lib/speech";
 import { porcupineConfigured, startPorcupine } from "@/lib/porcupineWake";
+import { openWakeConfigured, startOpenWakeWord, wakePhraseLabel } from "@/lib/openWakeWord";
 
 const EMPTY = { wakeOn: false, active: false, speaking: false };
 
@@ -39,7 +42,7 @@ export function WakeWord() {
     if (!shouldListen) return;
 
     let stopped = false;
-    let teardownPorcupine: (() => void) | null = null;
+    let teardownEngine: (() => void) | null = null;
 
     const onWake = () => {
       if (stopped) return;
@@ -99,37 +102,53 @@ export function WakeWord() {
       }
     };
 
-    // ── engine selection ──────────────────────────────────────────────────
-    if (porcupineConfigured()) {
-      startPorcupine(onWake)
+    // Start an async on-device engine; on init failure, run the fallback.
+    const startEngine = (
+      start: (cb: () => void) => Promise<() => void>,
+      fallback: () => void,
+    ) => {
+      start(onWake)
         .then((teardown) => {
           if (stopped) {
             teardown();
             return;
           }
-          teardownPorcupine = teardown;
+          teardownEngine = teardown;
         })
         .catch(() => {
-          // Porcupine failed to init (bad key, activation limit) — degrade.
-          if (!stopped) startWebSpeech();
+          if (!stopped) fallback();
         });
+    };
+
+    // ── engine selection (priority: openWakeWord → Porcupine → Web Speech) ──
+    if (openWakeConfigured()) {
+      startEngine(startOpenWakeWord, () => {
+        // on-device wake failed to load — try Porcupine if keyed, else Web Speech
+        if (porcupineConfigured()) startEngine(startPorcupine, startWebSpeech);
+        else startWebSpeech();
+      });
+    } else if (porcupineConfigured()) {
+      startEngine(startPorcupine, startWebSpeech);
     } else {
       startWebSpeech();
     }
 
     return () => {
       stopped = true;
-      if (teardownPorcupine) teardownPorcupine();
+      if (teardownEngine) teardownEngine();
       stopWebSpeech();
     };
   }, [voice.wakeOn, voice.active]);
 
-  if (!speechSupported() && !porcupineConfigured()) return null;
+  if (!speechSupported() && !porcupineConfigured() && !openWakeConfigured()) return null;
 
+  // On-device wake matches a fixed phrase ("hey jarvis"); the Web Speech
+  // fallback is more forgiving. Show the on-device phrase when it's the engine.
+  const phrase = openWakeConfigured() ? wakePhraseLabel() : "hey resolve";
   const label = voice.active
     ? "listening…"
     : voice.wakeOn
-      ? 'say "hey resolve"'
+      ? `say "${phrase}"`
       : "wake word";
 
   return (
@@ -139,7 +158,7 @@ export function WakeWord() {
       data-active={voice.active}
       title={
         voice.wakeOn
-          ? 'Wake word armed — say "resolve", "hey resolve", "yo resolve", or "what\'s up resolve". Tap to disarm.'
+          ? `Wake word armed — say "${phrase}". Tap to disarm.`
           : "Arm the wake word so you can start RESOLVE by voice"
       }
       onClick={() => {

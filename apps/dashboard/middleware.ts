@@ -14,8 +14,10 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // everything is gated except the gate itself and framework assets
+  // everything is gated except the gate itself, framework assets, and the
+  // on-device wake-word model files (public, non-sensitive; the wake engine
+  // fetches them and shouldn't depend on the gate cookie being present).
   matcher: [
-    "/((?!gate|api/gate|_next/static|_next/image|favicon.ico|manifest.webmanifest|icon-192.png|icon.svg|apple-icon.png).*)",
+    "/((?!gate|api/gate|_next/static|_next/image|favicon.ico|manifest.webmanifest|icon-192.png|icon.svg|apple-icon.png|openwakeword).*)",
   ],
 };
