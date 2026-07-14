@@ -148,8 +148,14 @@ let _browser = null, _page = null;
 async function ensurePage() {
   if (_page && !_page.isClosed()) return _page;
   const { chromium } = await import("playwright");
-  // headful (visible) by default so Trav can watch it work; PW_HEADLESS=1 hides it
-  _browser = await chromium.launch({ headless: process.env.PW_HEADLESS === "1" });
+  // Headless by default — the launchd agent runs as a Background process, so a
+  // VISIBLE browser can't reach the window server and hangs. Screenshots stand
+  // in for "watching it". Set PW_HEADFUL=1 only when running the worker in a
+  // normal Terminal (not launchd) if you want to see the window.
+  _browser = await chromium.launch({
+    headless: process.env.PW_HEADFUL !== "1",
+    timeout: 20000, // never hang forever on launch
+  });
   _page = await _browser.newPage({ viewport: { width: 1280, height: 900 } });
   return _page;
 }
