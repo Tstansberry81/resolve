@@ -2,8 +2,11 @@
   position: relative;
   width: 100%;
   margin: 0 auto;
-  max-height: 68vh;
+  /* fit between the header and the artifacts dock so it's never clipped by the
+     aside's overflow:hidden — scrolls internally instead of getting cut off */
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -15,12 +18,16 @@
 }
 
 .strip::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
 }
 
 .strip::-webkit-scrollbar-thumb {
-  background: var(--edge);
-  border-radius: 2px;
+  background: rgba(62, 224, 255, 0.35);
+  border-radius: 3px;
+}
+
+.strip::-webkit-scrollbar-thumb:hover {
+  background: rgba(62, 224, 255, 0.55);
 }
 
 .rowYou {

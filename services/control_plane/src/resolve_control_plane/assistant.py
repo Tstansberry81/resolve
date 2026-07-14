@@ -32,25 +32,38 @@ log = logging.getLogger("resolve.assistant")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-sonnet-4-6")
 MAX_TURNS = 8
 
-# Language that means "I'm about to act" — if the model ENDS its turn with this
-# but never called a tool, it's hallucinating the work. We nudge it to actually
-# do it instead of letting the promise be the final answer.
-_PROMISE_RE = re.compile(
+# The model hallucinates in two ways when it ends a turn WITHOUT calling a tool:
+# it promises ("creating it now") or falsely claims completion ("Done."). Either
+# is a lie if no tool ran. We detect both, plus whether the user's request was
+# actionable at all — if it was and nothing ran, that alone is enough to nudge.
+_CLAIM_RE = re.compile(
     r"\b(creating|making|building|setting up|working on|generating|drafting|"
     r"putting together|pulling (?:that|it) up|i'?ll|i will|let me|give me a|"
     r"one (?:sec|second|moment)|on it|hang on|hold on|getting (?:that|it)|"
-    r"will (?:create|make|do|set|send|add|update|draft|delete|find|check))\b",
+    r"will (?:create|make|do|set|send|add|update|draft|delete|find|check)|"
+    r"done|all set|created|made it|added|scheduled|sent|saved|posted|updated|"
+    r"deleted|removed|finished|completed|drafted|generated|ready|is live|"
+    r"here'?s (?:the|your|a)|i'?ve (?:created|made|added|sent|set|saved|scheduled|"
+    r"updated|deleted|drafted|built|put|generated|done))\b",
+    re.I,
+)
+_ACTIONABLE_RE = re.compile(
+    r"\b(make|create|build|write|draft|add|send|schedule|set up|put|delete|remove|"
+    r"update|edit|book|log|save|generate|email|text|remind|find|pull up|look up)\b",
     re.I,
 )
 
 
-def _sounds_like_promise(text: str) -> bool:
-    """True if the reply announces intent instead of reporting a result. A
-    trailing question is a clarification, which is allowed."""
+def _claims_action(text: str) -> bool:
     t = (text or "").strip()
-    if not t or t.rstrip().endswith("?"):
+    if not t or t.rstrip().endswith("?"):  # a question is a clarification — allowed
         return False
-    return bool(_PROMISE_RE.search(t))
+    return bool(_CLAIM_RE.search(t))
+
+
+def _looks_actionable(text: str) -> bool:
+    """The user asked for something to be done — a tool should have run."""
+    return bool(_ACTIONABLE_RE.search(text or ""))
 
 def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "get_calendar":
@@ -96,15 +109,18 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         from . import local
         return local.enqueue(str(args["task"]))
     if name == "create_google_doc":
-        res = composio.create_doc(str(args["title"]), str(args.get("content", "")))
+        res = composio.create_doc(str(args["title"]), str(args.get("content", "")),
+                                  folder=args.get("folder") or None)
         _log_gdrive_artifact(res)
         return res
     if name == "create_google_sheet":
-        res = composio.create_sheet(str(args["title"]), args.get("rows") or None)
+        res = composio.create_sheet(str(args["title"]), args.get("rows") or None,
+                                    folder=args.get("folder") or None)
         _log_gdrive_artifact(res)
         return res
     if name == "create_google_slides":
-        res = composio.create_slides(str(args["title"]), str(args["content"]))
+        res = composio.create_slides(str(args["title"]), str(args["content"]),
+                                     folder=args.get("folder") or None)
         _log_gdrive_artifact(res)
         return res
     if name == "find_google_file":
@@ -325,18 +341,22 @@ async def _loop(goal_id: str, text: str) -> None:
             if texts:
                 final_text = texts[-1]
             if resp.stop_reason != "tool_use" or not tool_uses:
-                # It ended its turn without calling a tool. If it never actually
-                # did anything yet AND it's talking like it's about to, that's a
-                # hallucination — force it to act instead of accepting the promise.
-                if not tool_uses and not tools_ran and nudges < 2 and _sounds_like_promise(final_text):
+                # It ended without calling a tool. If NOTHING has actually run yet
+                # and either the request was actionable or the reply claims/promises
+                # work, that's a hallucination — force it to act (or ask), never let
+                # "Done." with no tool call be the final answer.
+                reply_is_question = final_text.rstrip().endswith("?")
+                if (not tool_uses and not tools_ran and nudges < 2 and not reply_is_question
+                        and (_looks_actionable(text) or _claims_action(final_text))):
                     nudges += 1
                     messages.append({"role": "assistant", "content": resp.content})
                     messages.append({"role": "user", "content":
-                        "You replied as if you were about to do it, but you didn't call any "
-                        "tool — so nothing happened. Do NOT describe what you're about to do. "
-                        "Call the tool NOW to actually complete the task, or ask one specific "
-                        "clarifying question. Only give a final answer once it's done, with the "
-                        "real result (e.g. the link)."})
+                        "STOP. You did NOT call any tool, so nothing actually happened — "
+                        "the doc/task does not exist. Never claim you did something ('Done', "
+                        "'Created', 'Here's your…') or that you're about to — you have real "
+                        "tools, so CALL the tool now to actually do it, or ask one specific "
+                        "clarifying question. Only answer once it's truly done, with the real "
+                        "result from the tool."})
                     continue
                 break
 

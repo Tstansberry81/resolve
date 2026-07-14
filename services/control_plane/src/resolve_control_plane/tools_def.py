@@ -187,6 +187,7 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "title": {"type": "string", "description": "The document title / filename"},
                 "content": {"type": "string", "description": "Body as Markdown (headings, lists, **bold**, tables, links). Optional — omit for a blank doc."},
+                "folder": {"type": "string", "description": "Optional Drive folder name to put it in (created if it doesn't exist). Omit for root."},
             },
             "required": ["title"],
             "additionalProperties": False,
@@ -204,6 +205,7 @@ TOOLS: list[dict[str, Any]] = [
                     "description": "Optional rows to write, as an array of arrays. First row is treated as headers.",
                     "items": {"type": "array", "items": {"type": "string"}},
                 },
+                "folder": {"type": "string", "description": "Optional Drive folder name to put it in (created if it doesn't exist). Omit for root."},
             },
             "required": ["title"],
             "additionalProperties": False,
@@ -217,6 +219,7 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "title": {"type": "string", "description": "The presentation title"},
                 "content": {"type": "string", "description": "Markdown; '---' on its own line separates slides. '# Heading' per slide, bullets with '-'."},
+                "folder": {"type": "string", "description": "Optional Drive folder name to put it in (created if it doesn't exist). Omit for root."},
             },
             "required": ["title", "content"],
             "additionalProperties": False,
@@ -331,6 +334,10 @@ How you operate:
   calling the tool — never announce that you're "about to", "creating it now", "on it",
   "give me a sec", or that you'll do it. Those phrases without an actual tool call are
   lies. Either call the tool now, or ask ONE specific clarifying question.
+- NEVER say "Done", "Created", "Here's your…", or claim you finished ANYTHING unless a
+  tool actually ran and returned a result in THIS conversation. If you did not call a
+  tool, you did nothing — saying otherwise is a hallucination and is unacceptable. When
+  you create something, the reply MUST contain the real link/result the tool returned.
 - Only reply when EITHER (a) the task is fully done — then report the real result (the
   link, the outcome), or (b) you need a clarifying question to proceed. Nothing in between.
 - Never say you can't do something or aren't able to. You have real tools — use them. If a

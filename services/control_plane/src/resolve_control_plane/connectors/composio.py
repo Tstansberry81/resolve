@@ -78,24 +78,54 @@ def _col_letter(n: int) -> str:
     return s
 
 
+# ── folder placement ────────────────────────────────────────────────────────
+
+
+def _folder_id(name: str) -> str | None:
+    """Resolve a Drive folder by name, creating it in root if it doesn't exist."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    q = ("mimeType = 'application/vnd.google-apps.folder' and trashed = false "
+         f"and name = '{name}'")
+    data = execute("GOOGLEDRIVE_FIND_FILE", {"q": q, "fields": "files(id,name)", "pageSize": 3})
+    files = data.get("files") or []
+    if files:
+        return files[0].get("id")
+    made = execute("GOOGLEDRIVE_CREATE_FOLDER", {"name": name})
+    return made.get("id") or made.get("fileId") or made.get("folderId")
+
+
+def _place_in_folder(file_id: str, folder: str | None) -> None:
+    """Move a freshly created file from root into the named folder (best-effort)."""
+    if not folder or not file_id:
+        return
+    fid = _folder_id(folder)
+    if fid:
+        execute("GOOGLEDRIVE_MOVE_FILE",
+                {"file_id": file_id, "add_parents": fid, "remove_parents": "root"})
+
+
 # ── high-level helpers (return {url, id, ...}) ──────────────────────────────
 
 
-def create_doc(title: str, markdown_text: str = "") -> dict:
+def create_doc(title: str, markdown_text: str = "", folder: str | None = None) -> dict:
     data = execute(
         "GOOGLEDOCS_CREATE_DOCUMENT_MARKDOWN",
         {"title": title, "markdown_text": markdown_text or ""},
     )
     doc_id = data.get("documentId") or data.get("document_id")
+    _place_in_folder(doc_id, folder)
     url = data.get("display_url") or (
         f"https://docs.google.com/document/d/{doc_id}/edit" if doc_id else ""
     )
-    return {"url": url, "id": doc_id, "title": title}
+    return {"url": url, "id": doc_id, "title": title, "folder": folder}
 
 
-def create_sheet(title: str, rows: list[list] | None = None) -> dict:
+def create_sheet(title: str, rows: list[list] | None = None, folder: str | None = None) -> dict:
     data = execute("GOOGLESHEETS_CREATE_GOOGLE_SHEET1", {"title": title})
     sid = data.get("spreadsheetId") or data.get("spreadsheet_id")
+    _place_in_folder(sid, folder)
     url = data.get("spreadsheetUrl") or data.get("display_url") or (
         f"https://docs.google.com/spreadsheets/d/{sid}/edit" if sid else ""
     )
@@ -103,7 +133,7 @@ def create_sheet(title: str, rows: list[list] | None = None) -> dict:
     if rows and sid:
         _sheet_append(sid, "Sheet1", rows)
         wrote = len(rows)
-    return {"url": url, "id": sid, "title": title, "rowsWritten": wrote}
+    return {"url": url, "id": sid, "title": title, "rowsWritten": wrote, "folder": folder}
 
 
 def _sheet_append(spreadsheet_id: str, sheet: str, rows: list[list]) -> None:
@@ -120,14 +150,16 @@ def _sheet_append(spreadsheet_id: str, sheet: str, rows: list[list]) -> None:
     )
 
 
-def create_slides(title: str, markdown_text: str) -> dict:
+def create_slides(title: str, markdown_text: str, folder: str | None = None) -> dict:
     data = execute(
         "GOOGLESLIDES_CREATE_SLIDES_MARKDOWN",
         {"title": title, "markdown_text": markdown_text},
     )
     pid = data.get("presentation_id") or data.get("presentationId")
+    _place_in_folder(pid, folder)
     url = f"https://docs.google.com/presentation/d/{pid}/edit" if pid else ""
-    return {"url": url, "id": pid, "title": title, "slides": data.get("slide_count")}
+    return {"url": url, "id": pid, "title": title, "slides": data.get("slide_count"),
+            "folder": folder}
 
 
 # ── find / edit / delete ────────────────────────────────────────────────────
