@@ -193,8 +193,10 @@ async def approval_decide(approval_id: str, body: DecisionBody) -> dict:
 
 @app.post("/v1/stop", dependencies=[Depends(auth)])
 async def emergency_stop() -> dict:
-    await executor.set_halted(True)
-    return {"ok": True, "halted": True}
+    from .assistant import stop_current
+    await executor.set_halted(True)      # stay halted until resume
+    res = await stop_current()           # also cancel whatever's running RIGHT NOW
+    return {"ok": True, "halted": True, **res}
 
 
 @app.post("/v1/resume", dependencies=[Depends(auth)])

@@ -29,13 +29,17 @@ log = logging.getLogger("resolve.executor")
 
 PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-opus-4-8")
 EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-opus-4-8")
-MAX_STEP_TURNS = 6
+# kept modest to bound per-task cost (Opus + web search adds up fast)
+MAX_STEP_TURNS = int(os.getenv("EXECUTOR_MAX_STEP_TURNS", "4"))
 
-# Anthropic server-side web search — lets the executor research mid-step.
-WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 5}
+# Anthropic server-side web search — lets the executor research mid-step. Capped
+# low so a research task can't quietly rack up a big bill.
+WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search",
+                   "max_uses": int(os.getenv("EXECUTOR_WEB_MAX_USES", "3"))}
 
 queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 halted = False
+_current_step_task: "asyncio.Task | None" = None  # the step running right now
 # When True (and a local model is configured + reachable), executor steps run on
 # Trav's local Qwen instead of Opus. The planner always stays on Opus. Toggled
 # live from the dashboard; falls back to Opus if the local box is unreachable.
@@ -306,8 +310,43 @@ async def _run_step(item: dict[str, Any]) -> None:
                    detail=outcome or None, level="success", goal_id=goal_id)
 
 
+def is_working() -> bool:
+    """A step is running now or steps are waiting — used so 'stop' knows the
+    executor is busy even after the assistant handed off and returned."""
+    return _current_step_task is not None or not queue.empty()
+
+
+async def drain_queue() -> int:
+    """Drop every pending step so they never run (used by stop)."""
+    dropped = 0
+    while not queue.empty():
+        try:
+            item = queue.get_nowait()
+            queue.task_done()
+            dropped += 1
+            await _mark_task(item.get("task_id", ""), "cancelled")
+        except asyncio.QueueEmpty:
+            break
+    return dropped
+
+
+async def stop_current() -> dict[str, Any]:
+    """Hard-stop the executor: cancel the running step AND drop the rest. This is
+    what makes 'stop' actually stop mid-research instead of finishing the step."""
+    global _current_step_task
+    cancelled_running = False
+    t = _current_step_task
+    if t and not t.done():
+        t.cancel()
+        cancelled_running = True
+    dropped = await drain_queue()
+    await bus.set_orb("idle", "Stopped", [])
+    return {"cancelledRunning": cancelled_running, "droppedSteps": dropped}
+
+
 async def worker_loop() -> None:
     """Single in-process worker: one step at a time, halt flag between steps."""
+    global _current_step_task
     log.info("executor worker loop started")
     while True:
         item = await queue.get()
@@ -318,11 +357,20 @@ async def worker_loop() -> None:
                            goal_id=item["goal_id"])
             continue
         try:
-            await _run_step(item)
+            # run the step as a cancellable task so 'stop' can kill it mid-flight
+            _current_step_task = asyncio.create_task(_run_step(item))
+            await _current_step_task
+        except asyncio.CancelledError:
+            await _mark_task(item["task_id"], "cancelled")
+            await bus.emit("executor", "task.cancelled",
+                           f"Stopped: {item['title']}", level="warn",
+                           goal_id=item["goal_id"])
         except Exception as exc:
             log.exception("executor step failed")
             await _mark_task(item["task_id"], "failed")
             await bus.emit("executor", "task.failed", f"{item['title']} failed: {exc}",
                            level="error", goal_id=item["goal_id"])
+        finally:
+            _current_step_task = None
         if queue.empty():
             await bus.set_orb("idle", "Sonnet standing by", [])

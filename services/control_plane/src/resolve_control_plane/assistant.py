@@ -35,6 +35,30 @@ MAX_TURNS = 8
 # what to tell Trav to run when his laptop worker is offline
 WORKER_RESTART_CMD = "launchctl kickstart -k gui/$(id -u)/com.resolve.localworker"
 
+# A short message that's really a STOP/cancel command — must take priority and
+# kill the running task, not queue behind it.
+_STOP_STARTS = re.compile(r"^(stop|cancel|abort|halt|quit|kill)\b", re.I)
+# "stop by / stop at ..." — the verb is used normally, not as a stop command
+_STOP_NOT_STOP = re.compile(r"^stop\s+(by|at|off|for|near|into|onto|in|on|to)\b", re.I)
+_STOP_PHRASES = {
+    "enough", "wait", "whoa", "hold on", "hold up", "nevermind", "never mind",
+    "forget it", "forget that", "scratch that", "cut it out", "drop it",
+    "thats enough", "that's enough", "shut it down", "knock it off",
+    # "end" is only a stop command in these exact forms (not "end of year report")
+    "end it", "end this", "end that", "end task", "end the task", "end this task",
+}
+
+
+def _is_stop(text: str) -> bool:
+    """A brief message that means 'stop what you're doing' (not a real task)."""
+    t = (text or "").strip().rstrip(".!?").lower()
+    words = t.split()
+    if not words or len(words) > 8:  # long messages are genuine tasks
+        return False
+    if t in _STOP_PHRASES:
+        return True
+    return bool(_STOP_STARTS.match(t)) and not _STOP_NOT_STOP.match(t)
+
 # The model hallucinates in two ways when it ends a turn WITHOUT calling a tool:
 # it promises ("creating it now") or falsely claims completion ("Done."). Either
 # is a lie if no tool ran. We detect both, plus whether the user's request was
@@ -305,6 +329,7 @@ async def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
 _cmd_queue: "asyncio.Queue[tuple[str, str]] | None" = None
 _processor: "asyncio.Task | None" = None
 _current_goal: str | None = None
+_current_task: "asyncio.Task | None" = None  # the _loop running right now
 
 
 def _ensure_processor() -> None:
@@ -316,16 +341,21 @@ def _ensure_processor() -> None:
 
 
 async def _command_processor() -> None:
-    global _current_goal
+    global _current_goal, _current_task
     assert _cmd_queue is not None
     while True:
         goal_id, text = await _cmd_queue.get()
         _current_goal = goal_id
         try:
-            await _loop(goal_id, text)
+            # run as a cancellable task so 'stop' can kill it mid-flight
+            _current_task = asyncio.create_task(_loop(goal_id, text))
+            await _current_task
+        except asyncio.CancelledError:
+            pass  # stopped on purpose
         except Exception:
             log.exception("command processing failed")
         finally:
+            _current_task = None
             _current_goal = None
             _cmd_queue.task_done()
 
@@ -336,9 +366,50 @@ def queue_status() -> dict[str, Any]:
             "queued": _cmd_queue.qsize() if _cmd_queue is not None else 0}
 
 
+async def stop_current() -> dict[str, Any]:
+    """Immediately stop whatever's running: cancel the assistant turn, cancel the
+    executor's current research step and drop the rest, and clear the queue.
+    This is the 'stop' cutoff — it takes priority over everything."""
+    # 1) drop anything waiting in line
+    dropped_cmds = 0
+    if _cmd_queue is not None:
+        while not _cmd_queue.empty():
+            try:
+                _cmd_queue.get_nowait()
+                _cmd_queue.task_done()
+                dropped_cmds += 1
+            except asyncio.QueueEmpty:
+                break
+    # 2) kill the executor's running research step + its remaining steps
+    try:
+        ex_result = await executor.stop_current()
+    except Exception:
+        ex_result = {}
+    # 3) cancel the assistant turn in flight
+    cancelled = False
+    if _current_task is not None and not _current_task.done():
+        _current_task.cancel()
+        cancelled = True
+    await bus.set_orb("idle", "Stopped — standing by", [])
+    await bus.emit("assistant", "system.stopped",
+                   "Stopped. Cancelled the running task and cleared the queue.",
+                   level="warn")
+    return {"cancelledAssistant": cancelled, "droppedQueued": dropped_cmds, **ex_result}
+
+
 async def run_command(text: str) -> str:
     """Accept a command; returns the goal id. Runs are SERIALIZED — if one is
-    already in flight, this waits in line and never interrupts it."""
+    already in flight, this waits in line and never interrupts it. EXCEPT a
+    'stop' command, which jumps the line and cancels the running task."""
+    if _is_stop(text):
+        busy = (_current_goal is not None
+                or (_cmd_queue is not None and not _cmd_queue.empty())
+                or executor.is_working())
+        res = await stop_current()
+        reply = ("Stopped." if busy else "Nothing was running, but I'm clear and standing by.")
+        await bus.emit("assistant", "assistant.reply", reply, detail=reply, level="success")
+        return "stopped"
+
     goal_row = {
         "objective": text[:300],
         "category": "personal",
