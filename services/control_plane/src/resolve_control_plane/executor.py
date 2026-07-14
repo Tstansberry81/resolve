@@ -29,8 +29,10 @@ from .policy import PolicyDecision, evaluate_tool_call
 
 log = logging.getLogger("resolve.executor")
 
-PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-opus-4-8")
-EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-opus-4-8")
+# Planner stays on Sonnet so multi-step plans don't fall apart; the executor
+# runs on Haiku for cost. All overridable via env — flip back if quality dips.
+PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-sonnet-4-6")
+EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-haiku-4-5-20251001")
 # kept modest to bound per-task cost (Opus + web search adds up fast)
 MAX_STEP_TURNS = int(os.getenv("EXECUTOR_MAX_STEP_TURNS", "4"))
 

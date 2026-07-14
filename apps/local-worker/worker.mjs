@@ -22,7 +22,7 @@ import { exec, execFile } from "node:child_process";
 
 const CP = (process.env.CONTROL_PLANE_URL || "").replace(/\/$/, "");
 const CP_TOKEN = process.env.CP_TOKEN || "";
-const MODEL = process.env.WORKER_MODEL || "claude-opus-4-8";
+const MODEL = process.env.WORKER_MODEL || "claude-haiku-4-5-20251001";
 const ROOT = path.resolve(
   process.env.RESOLVE_WORKSPACE || path.join(os.homedir(), "resolve-workspace"),
 );

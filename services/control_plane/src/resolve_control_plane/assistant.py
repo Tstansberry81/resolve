@@ -29,7 +29,7 @@ from .tools_def import SYSTEM, TOOL_POLICY, TOOLS
 
 log = logging.getLogger("resolve.assistant")
 
-ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-sonnet-4-6")
+ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-haiku-4-5-20251001")
 MAX_TURNS = 8
 
 # what to tell Trav to run when his laptop worker is offline

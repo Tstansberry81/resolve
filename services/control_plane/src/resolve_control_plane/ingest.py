@@ -25,7 +25,7 @@ from .connectors import vault_github
 
 log = logging.getLogger("resolve.ingest")
 
-INGEST_MODEL = os.getenv("INGEST_MODEL", "claude-opus-4-8")
+INGEST_MODEL = os.getenv("INGEST_MODEL", "claude-haiku-4-5-20251001")
 MAX_TURNS = 44
 
 # event types that represent real activity worth ingesting (skip bookkeeping rows)

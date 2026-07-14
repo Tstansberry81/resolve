@@ -58,7 +58,11 @@ def record(role: str, model: str, usage: object) -> None:
     except Exception:
         return
 
-    p_in, p_out = PRICING.get(model, _DEFAULT_PRICE)
+    # tolerate dated model ids (e.g. claude-haiku-4-5-20251001) by prefix match
+    price = PRICING.get(model)
+    if price is None:
+        price = next((v for k, v in PRICING.items() if model.startswith(k)), _DEFAULT_PRICE)
+    p_in, p_out = price
     usd = in_tok / 1_000_000 * p_in + out_tok / 1_000_000 * p_out
     global _dirty
     with _lock:
