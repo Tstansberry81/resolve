@@ -26,6 +26,7 @@ from .connectors import composio, gcal, gmail_imap, local_llm, notion_api, simpl
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
 from .tools_def import SYSTEM, TOOL_POLICY, TOOLS
+from .msgutil import cached_system, compact_messages
 
 log = logging.getLogger("resolve.assistant")
 
@@ -499,12 +500,14 @@ async def _loop(goal_id: str, text: str) -> None:
     await bus.set_orb("thinking", "Sonnet is working your request", ["assistant"])
 
     now = datetime.now(ZoneInfo("America/New_York"))
-    system = SYSTEM + (
-        f"\n\nRight now it is {now.strftime('%A, %B %d, %Y at %I:%M %p')} Eastern."
+    # Static SYSTEM + tools are prompt-cached (billed 0.1x after the first turn);
+    # the datetime line is a tiny uncached block so it can't bust that cache.
+    system = cached_system(SYSTEM, (
+        f"Right now it is {now.strftime('%A, %B %d, %Y at %I:%M %p')} Eastern."
         " Resolve every relative date (tomorrow, Sunday, next week) from this —"
         " never guess weekdays. 'Tomorrow' always means the next calendar date,"
         " even between midnight and dawn."
-    )
+    ))
     messages: list[dict[str, Any]] = []
     for prior_user, prior_reply in history:
         messages.append({"role": "user", "content": prior_user})
@@ -518,6 +521,8 @@ async def _loop(goal_id: str, text: str) -> None:
     nudges = 0          # anti-hallucination re-prompts used
     try:
         for _ in range(MAX_TURNS):
+            # trim stale tool_result blobs so a long loop doesn't re-send them full
+            compact_messages(messages)
             resp = await client.messages.create(
                 model=ASSISTANT_MODEL,
                 # big enough to hold a full doc/sheet's content inside a single

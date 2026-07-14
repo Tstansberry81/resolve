@@ -24,6 +24,7 @@ import re
 
 from . import bus, costs, store
 from .connectors import local_llm, vault_github
+from .msgutil import cached_system, compact_messages
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
 
@@ -50,9 +51,11 @@ _current_step_task: "asyncio.Task | None" = None  # the step running right now
 local_exec = False
 
 PLANNER_SYSTEM = (
-    "You are the RESOLVE Planner (Opus). Break the user's goal into 2-6 concrete,"
-    " sequential steps the executor can do. The executor has ALL of these tools —"
-    " use whichever fit:\n"
+    "You are the RESOLVE Planner. Break the user's goal into the FEWEST sequential"
+    " steps that actually get it done — prefer 1-3, never pad to look thorough, and"
+    " use a SINGLE step whenever one executor turn can finish it. Every extra step"
+    " costs a full model run, so merge anything that can be done together. The"
+    " executor has ALL of these tools — use whichever fit:\n"
     "- Research/reading: web_search, get_calendar, get_tasks, get_unread_email, get_finance,"
     " vault_read, find_google_file\n"
     "- Saving output: save_to_vault (DEFAULT home for research/writeups — prefer this),"
@@ -62,10 +65,26 @@ PLANNER_SYSTEM = (
     "- The laptop: run_on_laptop (files/shell/real web browsing), open_folder / open_app /"
     " open_website\n"
     "- Calendar/tasks: create_calendar_event, create_task\n"
-    "Do NOT plan steps that send email or delete things — those need Trav's approval and"
-    " can't run inside an autonomous plan; leave them for him. Steps must be self-contained"
-    " with no placeholders. When the goal produces real output, ALWAYS include a final step"
-    " that saves it (save_to_vault by default). Call submit_plan exactly once."
+    "Keep each step's instructions TERSE — one or two sentences of what to do, no"
+    " preamble, no restating the goal. Web research is capped at a few searches total,"
+    " so don't plan a step per query; one 'research X' step covers it. Do NOT plan"
+    " steps that send email or delete things — those need Trav's approval and can't run"
+    " inside an autonomous plan; leave them for him. Steps must be self-contained with no"
+    " placeholders. When the goal produces real output, fold saving it into the final"
+    " step (save_to_vault by default) rather than adding a separate save step. Call"
+    " submit_plan exactly once."
+)
+
+# Static across every step + command → prompt-cached (tools + this preamble bill
+# at 0.1x after the first turn). The per-step Goal/Step/Instructions ride in a
+# separate uncached block so they don't bust the cache.
+EXECUTOR_PREAMBLE = (
+    "You are the RESOLVE executor. Complete exactly the one step you're given."
+    " Give your FULL result as your final message — for research, that means the"
+    " actual findings written out (not just a one-line summary). RESOLVE saves"
+    " your output to Trav's vault automatically, so do NOT claim you saved it"
+    " yourself and don't skip writing the real content. Be efficient: don't"
+    " re-run searches or reads you've already done — use what's in the transcript."
 )
 
 PLAN_TOOL = {
@@ -122,7 +141,7 @@ async def plan_project(goal_id: str, objective: str) -> dict[str, Any]:
 
     client = anthropic.AsyncAnthropic()
     resp = await client.messages.create(
-        model=PLANNER_MODEL, max_tokens=1500, system=PLANNER_SYSTEM,
+        model=PLANNER_MODEL, max_tokens=1500, system=cached_system(PLANNER_SYSTEM),
         tools=[PLAN_TOOL], tool_choice={"type": "tool", "name": "submit_plan"},
         messages=[{"role": "user", "content": objective}],
     )
@@ -206,15 +225,18 @@ async def _dispatch_tool(name: str, args: dict[str, Any], goal_id: str) -> tuple
         return f"Error: {exc}", True
 
 
-async def _execute_opus(item: dict[str, Any], system: str) -> str:
-    """Anthropic tool-use loop on claude-opus-4-8 (default executor backend)."""
+async def _execute_opus(item: dict[str, Any], context: str) -> str:
+    """Anthropic tool-use loop on the executor model (default backend). The static
+    preamble + tools are prompt-cached; ``context`` is the per-step detail."""
     from .assistant import TOOLS
 
     goal_id, title = item["goal_id"], item["title"]
     client = anthropic.AsyncAnthropic()
+    system = cached_system(EXECUTOR_PREAMBLE, context)
     messages: list[dict[str, Any]] = [{"role": "user", "content": f"Execute the step now: {title}"}]
     outcome = ""
     for _ in range(MAX_STEP_TURNS):
+        compact_messages(messages)  # trim stale tool_result blobs from the transcript
         resp = await client.messages.create(
             model=EXECUTOR_MODEL, max_tokens=1500, system=system,
             tools=TOOLS + [WEB_SEARCH_TOOL], messages=messages,
@@ -304,29 +326,24 @@ async def _run_step(item: dict[str, Any]) -> None:
     await bus.emit("executor", "task.started", f"Executor picked up: {title}",
                    goal_id=goal_id)
 
-    system = (
-        "You are the RESOLVE executor. Complete exactly this step of a larger plan."
-        " Give your FULL result as your final message — for research, that means the"
-        " actual findings written out (not just a one-line summary). RESOLVE saves"
-        " your output to Trav's vault automatically, so do NOT claim you saved it"
-        " yourself and don't skip writing the real content.\n"
+    context = (
         f"Goal: {item['objective']}\nStep: {title}\nInstructions: {item['instructions']}"
     )
 
     outcome = ""
     backend = "Opus"
     # Route to the local model when the toggle is on and it's configured; if the
-    # box is unreachable, fall back to Opus so the step still gets done.
+    # box is unreachable, fall back to the executor model so the step still runs.
     if local_exec and local_llm.configured():
         try:
-            outcome = await _execute_local(item, system)
+            outcome = await _execute_local(item, f"{EXECUTOR_PREAMBLE}\n{context}")
             backend = "local Qwen"
         except Exception as exc:
             await bus.emit("executor", "task.note",
-                           f"Local model unreachable ({str(exc)[:80]}) — using Opus",
+                           f"Local model unreachable ({str(exc)[:80]}) — using cloud model",
                            level="warn", goal_id=goal_id)
     if backend != "local Qwen":
-        outcome = await _execute_opus(item, system)
+        outcome = await _execute_opus(item, context)
 
     # GUARANTEE the output lands in the vault — deterministic, not up to the LLM.
     saved_url = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome))

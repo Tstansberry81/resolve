@@ -22,6 +22,7 @@ import anyio
 
 from . import bus, costs, store
 from .connectors import vault_github
+from .msgutil import cached_system, compact_messages
 
 log = logging.getLogger("resolve.ingest")
 
@@ -149,9 +150,13 @@ async def run_daily_ingest(day_iso: str | None = None) -> dict:
     written: list[str] = []
     nudges = 0
 
+    # The manual (14k chars) + tools are identical across all 44 turns of a run →
+    # prompt-cache them so they bill at 0.1x after turn one. Biggest single saving.
+    cached_sys = cached_system(system)
     for _ in range(MAX_TURNS):
+        compact_messages(messages)  # trim stale vault_read/search blobs from the transcript
         resp = await client.messages.create(
-            model=INGEST_MODEL, max_tokens=2500, system=system, tools=TOOLS, messages=messages,
+            model=INGEST_MODEL, max_tokens=2500, system=cached_sys, tools=TOOLS, messages=messages,
         )
         costs.record("ingest", INGEST_MODEL, resp.usage)
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
