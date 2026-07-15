@@ -13,6 +13,7 @@
     "productName": "RESOLVE",
     "directories": { "output": "dist" },
     "files": ["main.js", "icon.png"],
+    "afterPack": "./adhocSign.js",
     "mac": {
       "category": "public.app-category.productivity",
       "target": ["dmg"],
