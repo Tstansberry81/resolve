@@ -47,6 +47,8 @@ class RiskClass(StrEnum):
     DESTRUCTIVE = "destructive"
     FINANCIAL = "financial"
     CREDENTIAL_OR_PERMISSION = "credential_or_permission"
+    # reversible in principle but bulk/blast-radius — one approval per batch
+    BULK_REVERSIBLE = "bulk_reversible"
 
 
 GOAL_TRANSITIONS: dict[GoalStatus, set[GoalStatus]] = {

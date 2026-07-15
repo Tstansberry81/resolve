@@ -27,6 +27,14 @@ class ControlPlaneTests(unittest.TestCase):
         result = evaluate_tool_call("email.send", AutonomyMode.EXECUTE, config_dir=CONFIG)
         self.assertEqual(result.decision, PolicyDecision.REQUIRE_APPROVAL)
 
+    def test_email_archive_always_requires_approval(self):
+        result = evaluate_tool_call("email.archive", AutonomyMode.EXECUTE, config_dir=CONFIG)
+        self.assertEqual(result.decision, PolicyDecision.REQUIRE_APPROVAL)
+
+    def test_email_read_never_requires_approval(self):
+        result = evaluate_tool_call("email.read", AutonomyMode.OBSERVE, config_dir=CONFIG)
+        self.assertEqual(result.decision, PolicyDecision.ALLOW)
+
     def test_email_send_denied_below_execute_mode(self):
         result = evaluate_tool_call("email.send", AutonomyMode.ASSIST, config_dir=CONFIG)
         self.assertEqual(result.decision, PolicyDecision.DENY)

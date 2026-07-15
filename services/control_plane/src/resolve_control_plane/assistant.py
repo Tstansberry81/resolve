@@ -111,6 +111,10 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         )
     if name == "get_unread_email":
         return gmail_imap.unread_summary()
+    if name == "get_inbox_recent":
+        return gmail_imap.inbox_recent(min(int(args.get("limit", 25)), 50))
+    if name == "archive_emails":
+        return gmail_imap.archive_messages([str(u) for u in args.get("uids", [])])
     if name == "send_email":
         return gmail_imap.send_email(args["to"], args["subject"], args["body"])
     if name == "vault_log":
@@ -265,6 +269,8 @@ async def _queue_approval(goal_id: str, tool: str, args: dict[str, Any], risk: s
     preview: list[str] = [f"{k}: {str(v)[:90]}" for k, v in args.items()]
     summary = {
         "send_email": f"Send email to {args.get('to', '?')}: “{args.get('subject', '')[:60]}”",
+        "archive_emails": (f"Archive {len(args.get('uids', []))} emails from the inbox"
+                           + (f" — {str(args.get('reason', ''))[:80]}" if args.get("reason") else "")),
     }.get(tool, f"{tool} — needs your approval")
     row = {
         "action_summary": summary,

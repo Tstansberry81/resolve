@@ -42,6 +42,10 @@
     "credential_or_permission": {
       "minimum_mode": "autopilot",
       "approval": "always"
+    },
+    "bulk_reversible": {
+      "minimum_mode": "execute",
+      "approval": "always"
     }
   },
   "overrides": {
@@ -50,6 +54,9 @@
     },
     "email.send": {
       "risk": "communication_send"
+    },
+    "email.archive": {
+      "risk": "bulk_reversible"
     },
     "calendar.create": {
       "risk": "reversible_write"

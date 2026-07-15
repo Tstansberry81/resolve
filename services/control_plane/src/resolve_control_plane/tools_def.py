@@ -12,6 +12,8 @@ TOOL_POLICY = {
     "get_tasks": ("notion.tasks.read", "notion"),
     "create_task": ("notion.page.create", "notion"),
     "get_unread_email": ("email.read", "gmail"),
+    "get_inbox_recent": ("email.read", "gmail"),
+    "archive_emails": ("email.archive", "gmail"),
     "send_email": ("email.send", "gmail"),
     "vault_log": ("vault.append", "vault"),
     "save_to_vault": ("vault.write", "vault"),
@@ -87,6 +89,28 @@ TOOLS: list[dict[str, Any]] = [
         "name": "get_unread_email",
         "description": "Count unread Gmail messages and list the latest senders/subjects.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "get_inbox_recent",
+        "description": "List the latest inbox emails (newest first) with sender, subject, unread flag, a text snippet, and a stable uid per message. THE read for an inbox triage: review these, then propose archive_emails(uids) for the junk and draft replies for what matters.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "description": "How many recent messages (default 25, max 50)"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "archive_emails",
+        "description": "Archive inbox emails by uid (from get_inbox_recent). Reversible — Gmail keeps them in All Mail — but it ALWAYS queues ONE approval listing what gets archived before anything moves. Batch every archive of a triage into a single call.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "uids": {"type": "array", "items": {"type": "string"}, "description": "uid values to archive"},
+                "reason": {"type": "string", "description": "One line on why these are safe to archive (shown in the approval)"},
+            },
+            "required": ["uids"],
+            "additionalProperties": False,
+        },
     },
     {
         "name": "send_email",
@@ -407,6 +431,11 @@ How you operate:
   For spending, income, balances, or net worth, call get_finance.
 - Use ISO 8601 datetimes with the America/New_York offset for calendar writes.
 - send_email only queues for Trav's approval; tell him it's waiting on his approval banner.
+- INBOX TRIAGE ("triage my inbox", "clean up my email"): call get_inbox_recent, then sort
+  the messages yourself into (a) needs-a-reply — draft each reply IN YOUR ANSWER for Trav to
+  approve/send, (b) worth a look — one line each, (c) junk/newsletters/promos — archive via ONE
+  archive_emails call with all their uids + a reason. The archive queues a single approval
+  banner; never archive anything that plausibly needs Trav's eyes, and never send during triage.
 - Deletes (delete_task, delete_calendar_event) also queue for approval — look up the id first,
   then call the delete tool and tell him it's waiting on his banner.
 - When Trav wants something done ON his laptop (his files, running a command, reading a web
