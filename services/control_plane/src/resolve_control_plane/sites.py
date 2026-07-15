@@ -36,24 +36,39 @@ _STRIP = re.compile(
     re.I,
 )
 _SCHEME = re.compile(r"^[a-z]+://", re.I)
+# a bare domain ending in a recognizable TLD — so "figma.com" navigates but
+# "node.js" / "v1.2" fall through to a search instead of a bogus https:// URL
+_DOMAINISH = re.compile(
+    r"^[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|net|io|co|edu|gov|app|dev|ai|xyz|"
+    r"shop|store|me|tv|us|uk|ca|gg|so|info|biz|online|site)$",
+    re.I,
+)
+
+
+_cache: dict[str, str] | None = None
 
 
 def shortcuts() -> dict[str, str]:
     """Current alias -> URL map. Embedded defaults, optionally overridden by a
-    config/site_shortcuts.json if one is present on this deployment."""
-    table = dict(_SHORTCUTS)
-    try:
-        raw = config.load_json("site_shortcuts.json")
-        table.update(
-            {
-                str(k).strip().lower(): str(v).strip()
-                for k, v in raw.items()
-                if isinstance(v, str) and v.strip()
-            }
-        )
-    except Exception:
-        pass  # no config file — embedded defaults are authoritative
-    return table
+    config/site_shortcuts.json if one is present. Built once and cached — this is
+    called per assistant turn and per open_website, and the map is static for the
+    process lifetime (edit + redeploy to change)."""
+    global _cache
+    if _cache is None:
+        table = dict(_SHORTCUTS)
+        try:
+            raw = config.load_json("site_shortcuts.json")
+            table.update(
+                {
+                    str(k).strip().lower(): str(v).strip()
+                    for k, v in raw.items()
+                    if isinstance(v, str) and v.strip()
+                }
+            )
+        except Exception:
+            pass  # no config file — embedded defaults are authoritative
+        _cache = table
+    return _cache
 
 
 def resolve(query: str) -> str:
@@ -70,7 +85,7 @@ def resolve(query: str) -> str:
         return table[key]
     if _SCHEME.match(q):
         return q  # already a full URL
-    if " " not in q and "." in q:
+    if " " not in q and _DOMAINISH.match(q):
         return "https://" + q  # bare domain like "figma.com"
     # unknown short name — search for it rather than build a bad URL
     return "https://www.google.com/search?q=" + quote_plus(q)

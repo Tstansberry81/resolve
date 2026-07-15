@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import requests
 
@@ -220,8 +221,26 @@ def delete_file(file_id: str) -> dict:
     return {"deleted": True, "id": file_id}
 
 
+def _price_value(row: dict) -> float | None:
+    """Numeric price for a shopping row — prefer extracted_price, else parse the
+    display string ('$41.99', '£1,299.00') so rows without extracted_price still
+    filter/sort correctly instead of being silently dropped."""
+    v = row.get("extracted_price")
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = row.get("price")
+    if isinstance(s, str):
+        m = re.search(r"\d[\d,]*(?:\.\d+)?", s)
+        if m:
+            try:
+                return float(m.group().replace(",", ""))
+            except ValueError:
+                return None
+    return None
+
+
 def search_products(query: str, *, max_price: int | None = None,
-                    min_price: int | None = None, on_sale: bool = False,
+                    min_price: int | None = None,
                     sort_by: int | None = None, limit: int = 8) -> dict:
     """Product/shopping search across retailers (Amazon/Best Buy/Target/Walmart…
     via Google Shopping) with live prices, ratings and links. Auth-less Composio
@@ -231,8 +250,6 @@ def search_products(query: str, *, max_price: int | None = None,
         args["max_price"] = int(max_price)
     if min_price is not None:
         args["min_price"] = int(min_price)
-    if on_sale:
-        args["on_sale"] = True
     if sort_by is not None:
         args["sort_by"] = int(sort_by)
     data = execute("COMPOSIO_SEARCH_SHOPPING_SEARCH", args)
@@ -242,7 +259,7 @@ def search_products(query: str, *, max_price: int | None = None,
         {
             "title": p.get("title"),
             "price": p.get("price"),
-            "priceValue": p.get("extracted_price"),
+            "priceValue": _price_value(p),  # coerced once, reused for filter/sort
             "source": p.get("source"),
             "rating": p.get("rating"),
             "link": p.get("product_link") or p.get("link"),
@@ -250,15 +267,14 @@ def search_products(query: str, *, max_price: int | None = None,
         for p in rows
     ]
     # The upstream SERP doesn't reliably honor price filters/sort — enforce here.
-    def _pv(p: dict) -> float | None:
-        v = p.get("priceValue")
-        return float(v) if isinstance(v, (int, float)) else None
-
+    # Keep rows whose price we couldn't parse rather than dropping them (avoids a
+    # spurious "nothing found" when only some rows lack a numeric price).
     if max_price is not None:
-        products = [p for p in products if _pv(p) is not None and _pv(p) <= max_price]
+        products = [p for p in products if p["priceValue"] is None or p["priceValue"] <= max_price]
     if min_price is not None:
-        products = [p for p in products if _pv(p) is not None and _pv(p) >= min_price]
+        products = [p for p in products if p["priceValue"] is None or p["priceValue"] >= min_price]
     if sort_by in (1, 2):
-        products.sort(key=lambda p: (_pv(p) is None, _pv(p) or 0.0), reverse=(sort_by == 2))
+        products.sort(key=lambda p: (p["priceValue"] is None, p["priceValue"] or 0.0),
+                      reverse=(sort_by == 2))
     products = products[:limit]
     return {"query": query, "count": len(products), "products": products}

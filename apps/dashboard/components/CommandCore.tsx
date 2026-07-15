@@ -124,6 +124,7 @@ export function CommandCore() {
   const narratePrimedRef = useRef(false); // don't replay backlog on first mount
   const narrateQueueRef = useRef<string[]>([]);
   const narratingRef = useRef(false);
+  const narrateRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const maxEventId = () => {
     let m = -1;
@@ -356,12 +357,32 @@ export function CommandCore() {
 
   // ── Spoken progress narration for long background tasks ────────────────────
   const drainNarration = () => {
-    if (narratingRef.current || speakingNow()) return; // one at a time, no overlap
+    if (narratingRef.current) return; // a cue is already playing
+    if (narrateQueueRef.current.length === 0) return;
+    // Something else is talking (wake greeting, a lingering reply) — retry once
+    // it frees up instead of silently dropping the cue.
+    if (speakingNow()) {
+      if (!narrateRetryRef.current) {
+        narrateRetryRef.current = setTimeout(() => {
+          narrateRetryRef.current = null;
+          drainNarration();
+        }, 500);
+      }
+      return;
+    }
     const next = narrateQueueRef.current.shift();
     if (!next) return;
     narratingRef.current = true;
+    // Failsafe: speak()'s onend is swallowed if the utterance is superseded, which
+    // would otherwise leave narratingRef stuck true and kill narration. A watchdog
+    // guarantees the flag clears and the queue keeps draining.
+    const guard = setTimeout(() => {
+      narratingRef.current = false;
+      drainNarration();
+    }, 15000);
     speak(next, {
       onend: () => {
+        clearTimeout(guard);
         narratingRef.current = false;
         drainNarration(); // speak the next queued cue, if any
       },
@@ -393,10 +414,16 @@ export function CommandCore() {
   }, [events, voice.active, voice.wakeOn]);
 
   // Waking into a live turn drops queued narration — the user is talking now.
+  // (An in-flight cue is already superseded by the wake greeting's speak(), so we
+  // don't cancelSpeech here — that would kill the greeting instead.)
   useEffect(() => {
     if (voice.active) {
       narrateQueueRef.current = [];
       narratingRef.current = false;
+      if (narrateRetryRef.current) {
+        clearTimeout(narrateRetryRef.current);
+        narrateRetryRef.current = null;
+      }
     }
   }, [voice.active]);
 

@@ -181,7 +181,6 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
             str(args["query"]),
             max_price=args.get("max_price"),
             min_price=args.get("min_price"),
-            on_sale=bool(args.get("on_sale", False)),
             sort_by=args.get("sort_by"),
         )
     if name == "edit_google_doc":
@@ -386,6 +385,9 @@ async def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
             pass
     if pending_actions:
         await bus.set_orb("waiting", "Still waiting on your approval", ["assistant"])
+    elif executor.is_working():
+        # a background plan is still running — don't stomp its "executing" orb
+        await bus.set_orb("executing", "Working on your plan", ["executor"])
     else:
         await bus.set_orb("idle", "Sonnet standing by", [])
     return outcome

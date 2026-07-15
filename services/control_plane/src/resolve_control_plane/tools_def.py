@@ -317,7 +317,6 @@ TOOLS: list[dict[str, Any]] = [
                 "query": {"type": "string", "description": "What to search for, e.g. 'noise cancelling headphones' or 'standing desk'."},
                 "max_price": {"type": "integer", "description": "Only products at or below this price (USD)."},
                 "min_price": {"type": "integer", "description": "Only products at or above this price (USD)."},
-                "on_sale": {"type": "boolean", "description": "Only products currently on sale."},
                 "sort_by": {"type": "integer", "description": "1 = price low→high, 2 = price high→low."},
             },
             "required": ["query"],

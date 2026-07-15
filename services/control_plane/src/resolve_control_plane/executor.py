@@ -427,6 +427,7 @@ async def worker_loop() -> None:
     """Single in-process worker: one step at a time, halt flag between steps."""
     global _current_step_task
     log.info("executor worker loop started")
+    any_failed = False  # did any step in the current drain fail? resets when empty
     while True:
         item = await queue.get()
         if halted:
@@ -447,6 +448,7 @@ async def worker_loop() -> None:
                            f"Stopped: {item['title']}", level="warn",
                            goal_id=item["goal_id"])
         except Exception as exc:
+            any_failed = True
             log.exception("executor step failed")
             await _mark_task(item["task_id"], "failed")
             await bus.emit("executor", "task.failed", f"{item['title']} failed: {exc}",
@@ -455,7 +457,9 @@ async def worker_loop() -> None:
             _current_step_task = None
         if queue.empty():
             await bus.set_orb("idle", "Sonnet standing by", [])
-            # spoken sign-off once the whole plan is done (not on stop/failure)
+            # spoken sign-off once the whole plan is done — honest about failures
             if completed_ok:
-                await bus.emit("assistant", "speak.progress", "All wrapped up.",
+                msg = "Done — though a step ran into trouble." if any_failed else "All wrapped up."
+                await bus.emit("assistant", "speak.progress", msg,
                                goal_id=item.get("goal_id"))
+            any_failed = False  # reset for the next batch

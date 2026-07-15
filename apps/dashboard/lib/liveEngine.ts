@@ -156,6 +156,9 @@ export class LiveEngine {
         const a = msg.approval as Approval;
         const rest = this.state.approvals.filter((x) => x.id !== a.id);
         this.commit({ approvals: [a, ...rest] });
+        // A decided approval is authoritative — pull fresh goal/orb state so the
+        // sidebar mission clears without waiting on the guessed post-decide delay.
+        if (a.status && a.status !== "pending") void this.loadSnapshot();
       } else if (msg.kind === "artifact") {
         const art = msg.artifact as Artifact;
         const rest = this.state.artifacts.filter((x) => x.id !== art.id);
@@ -173,8 +176,13 @@ export class LiveEngine {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision }),
       // pull fresh goal/orb state so the sidebar mission clears out of
-      // "awaiting you" instead of waiting for the 30s poll
-    }).then(() => setTimeout(() => void this.loadSnapshot(), 1200));
+      // "awaiting you" instead of waiting for the 30s poll (backstop to the
+      // authoritative approval event on the SSE stream)
+    })
+      .then(() => setTimeout(() => void this.loadSnapshot(), 1200))
+      .catch(() => {
+        /* decide POST failed — the 30s poll and SSE stream still reconcile */
+      });
     // optimistic local update; authoritative events follow on the stream
     this.commit({
       approvals: this.state.approvals.map((a) => (a.id === id ? { ...a, status: decision } : a)),
