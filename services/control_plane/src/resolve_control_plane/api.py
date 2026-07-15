@@ -274,8 +274,10 @@ def local_result(body: ResultBody) -> dict:
 
 @app.post("/v1/local/event", dependencies=[Depends(auth)])
 async def local_event(body: EventBody) -> dict:
-    await bus.emit("executor", "local.event", body.summary, detail=body.detail,
-                   edge={"from": "executor", "to": "web"}, goal_id=body.taskId or None)
+    # Worker progress pulses the REAL delegation edge (assistant → laptop) so
+    # the constellation shows the actual handoff, not a made-up executor→web hop.
+    await bus.emit("local", "local.event", body.summary, detail=body.detail,
+                   edge={"from": "assistant", "to": "local"}, goal_id=body.taskId or None)
     return {"ok": True}
 
 
