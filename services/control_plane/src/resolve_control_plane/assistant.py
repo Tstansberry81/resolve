@@ -156,8 +156,8 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         a = str(args["app"])
         return local.enqueue_action("app", a, f"Opening {a}")
     if name == "open_website":
-        from . import local
-        u = str(args["url"])
+        from . import local, sites
+        u = sites.resolve(str(args["url"]))  # map Trav's shortcuts to exact URLs
         return local.enqueue_action("url", u, f"Opening {u}")
     if name == "create_google_doc":
         res = composio.create_doc(str(args["title"]), str(args.get("content", "")),
@@ -523,13 +523,24 @@ async def _loop(goal_id: str, text: str) -> None:
     await bus.set_orb("thinking", "Sonnet is working your request", ["assistant"])
 
     now = datetime.now(ZoneInfo("America/New_York"))
+    from . import sites
+    sc = sites.shortcuts()
+    sc_hint = ""
+    if sc:
+        sc_hint = (
+            " Trav has saved site shortcuts for: " + ", ".join(sorted(sc)) + "."
+            " When he asks to open one of these, call open_website with JUST that"
+            " short name (e.g. open_website 'outlook') — never guess a URL for them;"
+            " RESOLVE maps each to his exact saved URL. For any other site, pass a"
+            " full URL."
+        )
     # Static SYSTEM + tools are prompt-cached (billed 0.1x after the first turn);
-    # the datetime line is a tiny uncached block so it can't bust that cache.
+    # the datetime + shortcut lines are a tiny uncached block so they can't bust it.
     system = cached_system(SYSTEM, (
         f"Right now it is {now.strftime('%A, %B %d, %Y at %I:%M %p')} Eastern."
         " Resolve every relative date (tomorrow, Sunday, next week) from this —"
         " never guess weekdays. 'Tomorrow' always means the next calendar date,"
-        " even between midnight and dawn."
+        " even between midnight and dawn." + sc_hint
     ))
     messages: list[dict[str, Any]] = []
     for prior_user, prior_reply in history:
