@@ -159,7 +159,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "run_on_laptop",
-        "description": "Dispatch a task to Trav's laptop (the local worker): files in his workspace, running shell commands (asks approval), and REAL WEB BROWSING via Playwright — navigate a site, read/extract content, click, fill forms, screenshot. Use for anything that needs his machine OR interacting with a website (not just opening it). Give a clear, self-contained task; it runs in the background and streams into the feed.",
+        "description": "Dispatch a task to Trav's laptop (the local worker): files in his workspace, running shell commands (asks approval), REAL WEB BROWSING via Playwright — navigate a site, read/extract content, click, fill forms, screenshot — and LOOKING AT HIS SCREEN (the worker's look_at_screen tool answers 'what does this error say?' / 'what's open right now?'). Use for anything that needs his machine, interacting with a website (not just opening it), or seeing his screen. Give a clear, self-contained task; it runs in the background and streams into the feed.",
         "input_schema": {
             "type": "object",
             "properties": {"task": {"type": "string", "description": "Full self-contained task for the laptop agent"}},

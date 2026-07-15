@@ -142,6 +142,9 @@ const TOOLS = [
     input_schema: { type: "object", properties: { fullPage: { type: "boolean" } } } },
   { name: "browser_close", description: "Close the browser when the web task is finished.",
     input_schema: { type: "object", properties: {} } },
+  { name: "look_at_screen",
+    description: "Capture what's on the Mac's screen RIGHT NOW and answer a question about it (read-only — e.g. 'what does this error say?', 'what app/tab is open?'). Saves the screenshot as an artifact.",
+    input_schema: { type: "object", properties: { question: { type: "string", description: "What to look for / answer about the screen. Omit for a general description." } } } },
   { name: "finish", description: "Call when the task is complete, with a short result summary.",
     input_schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] } },
 ];
@@ -292,6 +295,32 @@ async function runTool(taskId, name, args) {
     await closeBrowser();
     return "Browser closed.";
   }
+  if (name === "look_at_screen") {
+    // Read-only screen Q&A: screencapture → downscale (stay under API image
+    // limits) → one vision call. Needs a one-time Screen Recording grant for
+    // the worker's node process (System Settings → Privacy) — without it macOS
+    // captures wallpaper only, which the answer will make obvious.
+    await fs.mkdir(ROOT, { recursive: true });
+    const p = path.join(ROOT, `screen-${Date.now()}.jpg`);
+    await new Promise((res, rej) =>
+      execFile("screencapture", ["-x", "-t", "jpg", p], { timeout: 15000 },
+        (e) => (e ? rej(new Error(`screencapture failed: ${e.message}`)) : res())));
+    await new Promise((res) =>
+      execFile("sips", ["--resampleWidth", "1728", p], { timeout: 15000 }, () => res()));
+    const b64 = (await fs.readFile(p)).toString("base64");
+    await artifact(taskId, p, "local", "created");
+    await emit(taskId, "looked at the screen");
+    const q = String(args.question || "").trim() || "Describe what's on the screen.";
+    const resp = await anthropic.messages.create({
+      model: MODEL, max_tokens: 1000,
+      messages: [{ role: "user", content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+        { type: "text", text: `This is a screenshot of Trav's Mac screen right now. ${q}` },
+      ] }],
+    });
+    const answer = resp.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+    return answer || "(couldn't read the screen)";
+  }
   throw new Error(`unknown tool ${name}`);
 }
 
@@ -316,6 +345,8 @@ async function runTask(taskId, task) {
     "For web tasks (visit a site and read/click/type/extract), drive a real Chromium browser: " +
     "browser_navigate to a URL, then browser_read to extract, browser_click (by visible text) and " +
     "browser_type to interact, browser_screenshot to capture. Call browser_close when finished. " +
+    "If the task asks about what's on the screen right now (an error, an open app/tab, a dialog), " +
+    "use look_at_screen with a focused question. " +
     "When done, call finish with a concise summary (include what you found/did).";
   if (manual) {
     system +=
