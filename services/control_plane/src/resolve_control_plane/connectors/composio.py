@@ -218,3 +218,47 @@ def delete_file(file_id: str) -> dict:
     """Permanently delete a Drive file (irreversible — approval-gated upstream)."""
     execute("GOOGLEDRIVE_GOOGLE_DRIVE_DELETE_FOLDER_OR_FILE_ACTION", {"fileId": file_id})
     return {"deleted": True, "id": file_id}
+
+
+def search_products(query: str, *, max_price: int | None = None,
+                    min_price: int | None = None, on_sale: bool = False,
+                    sort_by: int | None = None, limit: int = 8) -> dict:
+    """Product/shopping search across retailers (Amazon/Best Buy/Target/Walmart…
+    via Google Shopping) with live prices, ratings and links. Auth-less Composio
+    search tool. Returns a normalized, ranked list."""
+    args: dict = {"query": query}
+    if max_price is not None:
+        args["max_price"] = int(max_price)
+    if min_price is not None:
+        args["min_price"] = int(min_price)
+    if on_sale:
+        args["on_sale"] = True
+    if sort_by is not None:
+        args["sort_by"] = int(sort_by)
+    data = execute("COMPOSIO_SEARCH_SHOPPING_SEARCH", args)
+    results = (data.get("results") or {})
+    rows = results.get("shopping_results") or data.get("shopping_results") or []
+    products = [
+        {
+            "title": p.get("title"),
+            "price": p.get("price"),
+            "priceValue": p.get("extracted_price"),
+            "source": p.get("source"),
+            "rating": p.get("rating"),
+            "link": p.get("product_link") or p.get("link"),
+        }
+        for p in rows
+    ]
+    # The upstream SERP doesn't reliably honor price filters/sort — enforce here.
+    def _pv(p: dict) -> float | None:
+        v = p.get("priceValue")
+        return float(v) if isinstance(v, (int, float)) else None
+
+    if max_price is not None:
+        products = [p for p in products if _pv(p) is not None and _pv(p) <= max_price]
+    if min_price is not None:
+        products = [p for p in products if _pv(p) is not None and _pv(p) >= min_price]
+    if sort_by in (1, 2):
+        products.sort(key=lambda p: (_pv(p) is None, _pv(p) or 0.0), reverse=(sort_by == 2))
+    products = products[:limit]
+    return {"query": query, "count": len(products), "products": products}

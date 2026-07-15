@@ -176,6 +176,14 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         return res
     if name == "find_google_file":
         return composio.find_file(str(args["query"]))
+    if name == "search_products":
+        return composio.search_products(
+            str(args["query"]),
+            max_price=args.get("max_price"),
+            min_price=args.get("min_price"),
+            on_sale=bool(args.get("on_sale", False)),
+            sort_by=args.get("sort_by"),
+        )
     if name == "edit_google_doc":
         res = composio.edit_doc(str(args["document_id"]), str(args["content"]))
         _log_gdrive_artifact({**res, "title": args.get("name", "Google Doc")}, action="updated")

@@ -31,6 +31,7 @@ TOOL_POLICY = {
     "create_google_sheet": ("gdrive.create", "google"),
     "create_google_slides": ("gdrive.create", "google"),
     "find_google_file": ("gdrive.read", "google"),
+    "search_products": ("web.search", "google"),
     "edit_google_doc": ("gdrive.edit", "google"),
     "edit_google_sheet": ("gdrive.edit", "google"),
     "add_google_slides": ("gdrive.edit", "google"),
@@ -308,6 +309,22 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "search_products",
+        "description": "Search for products to buy across retailers (Amazon, Best Buy, Target, Walmart, etc. via Google Shopping) with live prices, ratings, and links. Use whenever Trav wants to find, compare, or price something to buy ('find me…', 'how much is…', 'cheapest…'). Returns a ranked list; reply with the top few as name — price — [link]. Note: it's cross-retailer, so Amazon shows up when it's in the shopping feed, not always.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to search for, e.g. 'noise cancelling headphones' or 'standing desk'."},
+                "max_price": {"type": "integer", "description": "Only products at or below this price (USD)."},
+                "min_price": {"type": "integer", "description": "Only products at or above this price (USD)."},
+                "on_sale": {"type": "boolean", "description": "Only products currently on sale."},
+                "sort_by": {"type": "integer", "description": "1 = price low→high, 2 = price high→low."},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "edit_google_doc",
         "description": "Append text to the end of an existing Google Doc (plain text). Get the document_id from create_google_doc or find_google_file.",
         "input_schema": {
@@ -400,6 +417,8 @@ How you operate:
   Resolve vague targets yourself — 'the news' -> https://news.google.com, 'my downloads' ->
   ~/Downloads, 'spotify' -> open_app Spotify. Just do it and tell him it's opening; these need
   the laptop worker to be online.
+- To find, compare, or price something to buy, use search_products (cross-retailer
+  shopping search with live prices + links). Give Trav the top few as name — price — link.
 - For Google Docs/Sheets/Slides, use create_google_doc / create_google_sheet / create_google_slides.
   Write real content (Markdown), not placeholders, and give Trav the returned link.
   To change an existing file, call find_google_file to get its id, then edit_google_doc /

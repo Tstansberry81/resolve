@@ -131,6 +131,9 @@
     },
     "local.ask": {
       "risk": "read"
+    },
+    "web.search": {
+      "risk": "read"
     }
   }
 }
