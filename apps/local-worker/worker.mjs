@@ -19,6 +19,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { exec, execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const SELF_DIR = path.dirname(fileURLToPath(import.meta.url)); // apps/local-worker (inside the repo)
 
 const CP = (process.env.CONTROL_PLANE_URL || "").replace(/\/$/, "");
 const CP_TOKEN = process.env.CP_TOKEN || "";
@@ -386,14 +389,53 @@ async function runOpen(taskId, action) {
   return out;
 }
 
+// ── self-update (idle only) ─────────────────────────────────────────────────
+// The worker lives in the resolve repo; new worker code ships by pushing to
+// origin. Once an hour, while idle, pull --ff-only and restart (launchd
+// KeepAlive relaunches us) if anything under apps/local-worker/ changed.
+const UPDATE_EVERY_MS = 60 * 60 * 1000;
+const execEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }; // never hang on a credential prompt
+function sh(cmd, timeout = 60_000) {
+  return new Promise((resolve, reject) => {
+    exec(cmd, { cwd: SELF_DIR, timeout, env: execEnv, maxBuffer: 1024 * 1024 },
+      (err, stdout) => (err ? reject(err) : resolve(String(stdout).trim())));
+  });
+}
+async function checkForUpdate() {
+  try {
+    const before = await sh("git rev-parse HEAD");
+    await sh("git pull --ff-only --quiet");
+    const after = await sh("git rev-parse HEAD");
+    if (before === after) return;
+    const changed = await sh(`git diff --name-only ${before} ${after}`);
+    if (!/apps\/local-worker\//.test(changed)) return; // update didn't touch the worker
+    if (/apps\/local-worker\/package(-lock)?\.json/.test(changed)) {
+      console.log("worker update: installing deps…");
+      await sh("npm install --no-audit --no-fund", 300_000);
+    }
+    console.log(`worker update: ${before.slice(0, 7)} → ${after.slice(0, 7)} — restarting to load it`);
+    process.exit(0); // launchd KeepAlive relaunches with the new code
+  } catch (e) {
+    console.error("worker update check failed:", e.message); // soft-fail (offline, dirty tree, …)
+  }
+}
+
 // ── main poll loop ──────────────────────────────────────────────────────────
+// Poll failures back off 5s→10s→20s→40s→60s and force a clean relaunch after
+// ~15 consecutive misses (~12 min): a fresh process shakes off wedged sockets
+// / DNS after sleep or network changes, and launchd brings us right back.
+const MAX_POLL_FAILS = 15;
 async function main() {
   if (!CP) throw new Error("CONTROL_PLANE_URL not set");
   await fs.mkdir(ROOT, { recursive: true });
   console.log(`RESOLVE local worker online. workspace=${ROOT} control-plane=${CP}`);
+  let pollFails = 0;
+  let lastUpdateCheck = 0;
   for (;;) {
     try {
       const job = await cp("/v1/local/next"); // { taskId, task, action? } or null
+      if (pollFails) console.log(`poll recovered after ${pollFails} failure(s)`);
+      pollFails = 0;
       if (job && job.taskId) {
         if (job.action) {
           console.log(`> open ${job.taskId}: ${job.action.kind} ${String(job.action.value).slice(0, 80)}`);
@@ -403,11 +445,23 @@ async function main() {
           await runTask(job.taskId, job.task).catch((e) => console.error("task failed", e));
         }
       } else {
+        if (Date.now() - lastUpdateCheck > UPDATE_EVERY_MS) {
+          lastUpdateCheck = Date.now();
+          await checkForUpdate(); // idle only — never restarts mid-task
+        }
         await new Promise((r) => setTimeout(r, 3000));
       }
     } catch (e) {
-      console.error("poll error:", e.message);
-      await new Promise((r) => setTimeout(r, 5000));
+      pollFails += 1;
+      if (pollFails === 1 || pollFails % 5 === 0) {
+        console.error(`poll error (${pollFails}x): ${e.message}`);
+      }
+      if (pollFails >= MAX_POLL_FAILS) {
+        console.error("too many consecutive poll failures — restarting for a clean slate");
+        process.exit(1); // launchd KeepAlive relaunches us
+      }
+      const wait = Math.min(60_000, 5000 * 2 ** Math.min(pollFails - 1, 4));
+      await new Promise((r) => setTimeout(r, wait));
     }
   }
 }
