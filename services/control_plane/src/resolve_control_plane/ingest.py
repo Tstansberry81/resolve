@@ -31,7 +31,15 @@ MAX_TURNS = 44
 
 # event types that represent real activity worth ingesting (skip bookkeeping rows)
 _ACTIVITY = {"goal.accepted", "assistant.reply", "task.completed", "goal.completed",
-             "route.classified", "plan.ready"}
+             "route.classified", "plan.ready", "action.held"}
+
+
+def _is_activity(event_type: str) -> bool:
+    """Include decisions and failures too: '<tool>.executed' (approved + ran),
+    'action.held' (rejected), and '*.failed' — the day's record is incomplete
+    without what Trav approved/rejected and what broke."""
+    t = event_type or ""
+    return t in _ACTIVITY or t.endswith(".executed") or t.endswith(".failed")
 
 TOOLS = [
     {"name": "vault_read", "description": "Read a vault file's contents.",
@@ -86,7 +94,7 @@ def gather_materials(day_iso: str) -> str:
     try:
         events = store.select("agent_events", {"and": rng, "order": "created_at.asc", "limit": "300"})
         for e in events:
-            if e.get("event_type") not in _ACTIVITY:
+            if not _is_activity(e.get("event_type", "")):
                 continue
             p = e.get("payload") or {}
             if isinstance(p, str):
