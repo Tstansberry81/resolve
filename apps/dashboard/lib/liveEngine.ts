@@ -36,6 +36,7 @@ function vitalsFrom(
   orb: string,
   pending: number,
   costs?: CostSnapshot,
+  laptopOnline = false,
 ): Vitals {
   const byId = new Map(connectors.map((c) => [c.id, c]));
   const costByRole = new Map((costs?.models ?? []).map((m) => [m.role, m]));
@@ -52,6 +53,7 @@ function vitalsFrom(
     tokensToday: costs?.tokensToday ?? 0,
     costTodayUsd: costs?.totalCostTodayUsd ?? 0,
     workerStatus: orb === "executing" ? "executing" : "idle",
+    laptop: laptopOnline ? "online" : "offline",
   };
 }
 
@@ -112,7 +114,8 @@ export class LiveEngine {
         approvals: s.approvals ?? [],
         events: (s.events ?? []).slice().reverse(),
         artifacts: s.artifacts ?? [],
-        vitals: vitalsFrom(s.connectors ?? [], s.orb, s.pendingApprovals ?? 0, s.costs),
+        vitals: vitalsFrom(s.connectors ?? [], s.orb, s.pendingApprovals ?? 0, s.costs,
+          Boolean(s.localWorker)),
         localExec: Boolean(s.localExec),
         localAvailable: Boolean(s.localAvailable),
       });

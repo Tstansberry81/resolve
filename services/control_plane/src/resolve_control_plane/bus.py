@@ -32,6 +32,8 @@ NOTIFY_TYPES = {
     "task.completed": "✅ Executor",
     "task.failed": "⚠️ Executor",
     "system.emergency_stop": "🛑 RESOLVE",
+    "system.worker_offline": "🔌 RESOLVE",
+    "system.worker_online": "🔌 RESOLVE",
 }
 
 

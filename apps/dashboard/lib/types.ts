@@ -120,6 +120,7 @@ export interface Vitals {
   tokensToday: number;
   costTodayUsd: number;
   workerStatus: "idle" | "executing" | "stopped";
+  laptop: "online" | "offline"; // local worker (the Mac "hands") liveness
 }
 
 export interface EngineState {

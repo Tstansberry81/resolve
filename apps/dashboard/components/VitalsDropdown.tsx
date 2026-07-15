@@ -10,7 +10,9 @@ export function VitalsDropdown() {
   const { vitals, activeNodes, emergencyStopped } = useEngine();
   const [open, setOpen] = useState(false);
 
-  const degraded = vitals.connectors.some((c) => c.status !== "healthy");
+  const degraded =
+    vitals.connectors.some((c) => c.status !== "healthy") ||
+    vitals.laptop === "offline";
   const status = emergencyStopped
     ? { label: "STOPPED", tone: "red" }
     : degraded
@@ -28,6 +30,9 @@ export function VitalsDropdown() {
         <span className="vitals-dot" />
         {status.label}
         <span className="vitals-sub">worker {vitals.workerStatus}</span>
+        <span className="vitals-sub" data-tone={vitals.laptop === "online" ? "green" : "amber"}>
+          laptop {vitals.laptop}
+        </span>
         <span className={`chev ${open ? "chev-open" : ""}`}>▸</span>
       </button>
 

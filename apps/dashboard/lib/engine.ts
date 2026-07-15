@@ -54,6 +54,7 @@ const INITIAL_VITALS: Vitals = {
   tokensToday: 182_400,
   costTodayUsd: 1.22,
   workerStatus: "idle",
+  laptop: "online",
 };
 
 class MockEngine {

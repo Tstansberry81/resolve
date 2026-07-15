@@ -55,6 +55,11 @@ async def scheduler_loop() -> None:
         except Exception:
             log.exception("routine tick failed")
         try:
+            from . import local
+            await local.watchdog_tick()  # worker-offline alerting
+        except Exception:
+            log.exception("worker watchdog tick failed")
+        try:
             from . import costs
             await asyncio.to_thread(costs.persist)  # flush cost totals to Supabase
         except Exception:

@@ -26,6 +26,38 @@ def online() -> bool:
     return (time.time() - _last_poll) < 30
 
 
+# ── offline watchdog (ticked once a minute by the routine scheduler) ─────────
+OFFLINE_ALERT_SECS = 120
+KICKSTART_HINT = "launchctl kickstart -k gui/$(id -u)/com.resolve.localworker"
+_watch: dict[str, Any] = {"offline_since": None, "alerted": False}
+
+
+async def watchdog_tick() -> None:
+    """Alert (bus event → Telegram) when the worker has been offline for a
+    while, and again when it recovers. At control-plane boot the worker counts
+    as offline until its first poll, so the 2-minute grace also covers deploys."""
+    if online():
+        if _watch["alerted"]:
+            await bus.emit("core", "system.worker_online",
+                           "Local worker is back online — laptop hands restored.")
+        _watch["offline_since"] = None
+        _watch["alerted"] = False
+        return
+    if _watch["offline_since"] is None:
+        _watch["offline_since"] = time.time()
+        return
+    down = time.time() - _watch["offline_since"]
+    if not _watch["alerted"] and down >= OFFLINE_ALERT_SECS:
+        _watch["alerted"] = True
+        await bus.emit(
+            "core", "system.worker_offline",
+            f"Local worker offline {int(down // 60)}m — laptop hands are down.",
+            detail=("Local worker offline — laptop hands are down.\n"
+                    f"On the Mac: {KICKSTART_HINT}"),
+            level="warn",
+        )
+
+
 def enqueue(task: str) -> dict[str, Any]:
     task_id = str(uuid.uuid4())
     _queue.append({"taskId": task_id, "task": task})
