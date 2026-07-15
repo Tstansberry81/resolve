@@ -27,6 +27,30 @@ BRIEF_PROMPT = (
 )
 
 
+# Today's finished brief text, held for the dashboard: CommandCore speaks it on
+# the first armed wake of the day (snapshot.morningBrief). In-memory only — a
+# control-plane restart just means that day's brief isn't re-spoken.
+_brief_store: dict[str, str | None] = {"date": None, "text": None}
+
+
+def brief_today() -> dict[str, str] | None:
+    today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    if _brief_store["date"] == today and _brief_store["text"]:
+        return {"date": today, "text": _brief_store["text"]}
+    return None
+
+
+async def _capture_brief(goal_id: str, day: str) -> None:
+    """Pick the brief goal's assistant.reply off the bus (checks for ~5 min)."""
+    for _ in range(60):
+        await asyncio.sleep(5)
+        for ev in reversed(bus.recent_events()):
+            if ev.get("type") == "assistant.reply" and ev.get("goalId") == goal_id:
+                _brief_store["date"] = day
+                _brief_store["text"] = ev.get("detail") or ev.get("summary") or ""
+                return
+
+
 async def run_morning_brief() -> str:
     from .assistant import run_command
 
@@ -34,7 +58,9 @@ async def run_morning_brief() -> str:
     _last_brief_date = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     await bus.emit("core", "routine.morning_brief",
                    "Morning brief routine kicked off", level="info")
-    return await run_command(BRIEF_PROMPT)
+    goal_id = await run_command(BRIEF_PROMPT)
+    asyncio.get_running_loop().create_task(_capture_brief(goal_id, _last_brief_date))
+    return goal_id
 
 
 async def scheduler_loop() -> None:

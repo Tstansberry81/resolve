@@ -140,4 +140,6 @@ export interface EngineState {
   localExec: boolean;
   /** a local model is configured (LOCAL_MODEL_URL set) */
   localAvailable: boolean;
+  /** today's finished morning brief — spoken once on the first armed wake */
+  morningBrief: { date: string; text: string } | null;
 }

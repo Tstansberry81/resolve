@@ -72,6 +72,7 @@ class MockEngine {
     emergencyStopped: false,
     localExec: false,
     localAvailable: false,
+    morningBrief: null,
   };
 
   private listeners = new Set<() => void>();

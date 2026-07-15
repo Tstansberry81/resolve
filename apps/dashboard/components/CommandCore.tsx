@@ -28,8 +28,24 @@ const STATE_LABEL: Record<string, string> = {
 
 const EMPTY_VOICE = { wakeOn: false, active: false, speaking: false };
 
+// Markdown → something worth hearing: strip formatting, cap at a sentence
+// boundary so a long brief doesn't monologue for minutes.
+function spokenBrief(md: string): string {
+  const plain = md
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[#*_`>|]+/g, " ")
+    .replace(/^\s*[-•]\s*/gm, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= 700) return plain;
+  const cut = plain.slice(0, 700);
+  const end = cut.lastIndexOf(". ");
+  return `${cut.slice(0, end > 400 ? end + 1 : 700)} That's the highlights — the full brief is on your dashboard.`;
+}
+
 export function CommandCore() {
-  const { orb, orbCaption, emergencyStopped, events } = useEngine();
+  const { orb, orbCaption, emergencyStopped, events, morningBrief } = useEngine();
   const voice = useSyncExternalStore(subscribeVoice, getVoice, () => EMPTY_VOICE);
   const [text, setText] = useState("");
   const [listening, setListening] = useState(false);
@@ -376,10 +392,11 @@ export function CommandCore() {
     // Failsafe: speak()'s onend is swallowed if the utterance is superseded, which
     // would otherwise leave narratingRef stuck true and kill narration. A watchdog
     // guarantees the flag clears and the queue keeps draining.
+    // (scaled for long passages like the morning brief — ~90ms/char floor 15s)
     const guard = setTimeout(() => {
       narratingRef.current = false;
       drainNarration();
-    }, 15000);
+    }, Math.max(15000, next.length * 90));
     speak(next, {
       onend: () => {
         clearTimeout(guard);
@@ -426,6 +443,21 @@ export function CommandCore() {
       }
     }
   }, [voice.active]);
+
+  // ── Morning brief: speak once on the first armed wake of the day ──────────
+  useEffect(() => {
+    if (!voice.wakeOn || voice.active || !morningBrief?.text) return;
+    const KEY = "resolve.briefSpokenDate";
+    try {
+      if (localStorage.getItem(KEY) === morningBrief.date) return;
+      localStorage.setItem(KEY, morningBrief.date); // mark first — never double-speak
+    } catch {
+      return; // no storage → skip rather than repeat the brief every mount
+    }
+    narrateQueueRef.current.push(`Good morning. ${spokenBrief(morningBrief.text)}`);
+    drainNarration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.wakeOn, voice.active, morningBrief]);
 
   const micActive = listening || voice.active;
 

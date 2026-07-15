@@ -139,6 +139,7 @@ async def snapshot() -> dict:
         "localExec": executor.local_exec,
         "localAvailable": local_llm.configured(),
         "localWorker": local.online(),
+        "morningBrief": routines.brief_today(),
     }
 
 

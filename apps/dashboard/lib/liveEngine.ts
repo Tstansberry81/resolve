@@ -72,6 +72,7 @@ export class LiveEngine {
     emergencyStopped: false,
     localExec: false,
     localAvailable: false,
+    morningBrief: null,
   };
 
   private listeners = new Set<() => void>();
@@ -118,6 +119,7 @@ export class LiveEngine {
           Boolean(s.localWorker)),
         localExec: Boolean(s.localExec),
         localAvailable: Boolean(s.localAvailable),
+        morningBrief: s.morningBrief ?? null,
       });
     } catch {
       // snapshot refresh is best-effort; SSE keeps flowing
