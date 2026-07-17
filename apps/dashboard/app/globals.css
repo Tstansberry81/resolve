@@ -574,6 +574,24 @@ body::before {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-2);
+  margin-right: auto;
+}
+
+.mission-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  margin-left: 6px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+.mission-dismiss:hover {
+  opacity: 1;
+  color: var(--red, #f66);
 }
 
 .chip {

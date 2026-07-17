@@ -235,12 +235,39 @@ function browserSpeak(clean: string, done: () => void): void {
   synth.speak(u);
 }
 
+// Never read a URL aloud: markdown links speak their label, bare links vanish,
+// and one "the link's in the chat" tail replaces them (the visible reply still
+// carries the actual links).
+function stripSpokenLinks(text: string): string {
+  let n = 0;
+  let out = text.replace(/\[([^\]]+)\]\(\s*[^)]*\)/g, (_m, label: string) => {
+    n += 1;
+    return label;
+  });
+  out = out
+    .replace(/\bhttps?:\/\/[^\s)>\]]+/gi, () => {
+      n += 1;
+      return "";
+    })
+    .replace(/\bwww\.[^\s)>\]]+/gi, () => {
+      n += 1;
+      return "";
+    })
+    .replace(/\(\s*\)/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ ([,.;!?])/g, "$1");
+  if (n > 0 && !/link/i.test(out)) {
+    out = `${out.trim()} ${n > 1 ? "The links are in the chat." : "The link's in the chat."}`;
+  }
+  return out;
+}
+
 export function speak(text: string, opts: { onend?: () => void } = {}): void {
   if (typeof window === "undefined") {
     opts.onend?.();
     return;
   }
-  const clean = text.replace(/[*_#`]/g, "").slice(0, 600).trim();
+  const clean = stripSpokenLinks(text).replace(/[*_#`]/g, "").slice(0, 600).trim();
   if (!clean) {
     opts.onend?.();
     return;

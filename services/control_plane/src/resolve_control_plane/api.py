@@ -181,6 +181,21 @@ async def command(body: CommandBody) -> dict:
     return {"ok": True, "goalId": goal_id}
 
 
+@app.post("/v1/goals/{goal_id}/dismiss", dependencies=[Depends(auth)])
+async def goal_dismiss(goal_id: str) -> dict:
+    """Manually clear a mission from the log. Exists for zombie goals: a goal
+    parked on an approval whose in-memory pending action died in a deploy can
+    never resolve on its own — this cancels it in the store."""
+    try:
+        await anyio.to_thread.run_sync(
+            lambda: store.update("goals", {"id": f"eq.{goal_id}"}, {"status": "cancelled"})
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"store update failed: {exc}")
+    await bus.emit("core", "goal.dismissed", "Mission dismissed from the log", goal_id=goal_id)
+    return {"ok": True, "goalId": goal_id}
+
+
 class DecisionBody(BaseModel):
     decision: str  # approved | rejected
 

@@ -194,6 +194,16 @@ export class LiveEngine {
     });
   };
 
+  dismissGoal = (id: string) => {
+    void fetch(`/api/cp/v1/goals/${id}/dismiss`, { method: "POST" })
+      .then(() => setTimeout(() => void this.loadSnapshot(), 800))
+      .catch(() => {
+        /* the 30s poll reconciles if the POST failed */
+      });
+    // optimistic: drop the card immediately
+    this.commit({ goals: this.state.goals.filter((g) => g.id !== id) });
+  };
+
   submitCommand = (text: string) => {
     void fetch("/api/cp/v1/command", {
       method: "POST",

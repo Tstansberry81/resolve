@@ -312,6 +312,10 @@ class MockEngine {
     this.runScenario(sc);
   };
 
+  dismissGoal = (id: string) => {
+    this.commit({ goals: this.state.goals.filter((g) => g.id !== id) });
+  };
+
   emergencyStop = () => {
     this.timers.forEach((t) => clearTimeout(t));
     this.timers.clear();

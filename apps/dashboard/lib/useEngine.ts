@@ -14,6 +14,7 @@ type EngineLike = {
   getSnapshot: () => EngineState;
   decideApproval: (id: string, decision: "approved" | "rejected") => void;
   submitCommand: (text: string) => void;
+  dismissGoal: (id: string) => void;
   emergencyStop: () => void;
   resume: () => void;
   setLocalExec: (on: boolean) => void;
@@ -51,6 +52,7 @@ async function probe() {
 export const engine = {
   decideApproval: (id: string, d: "approved" | "rejected") => current?.decideApproval(id, d),
   submitCommand: (t: string) => current?.submitCommand(t),
+  dismissGoal: (id: string) => current?.dismissGoal(id),
   emergencyStop: () => current?.emergencyStop(),
   resume: () => current?.resume(),
   setLocalExec: (on: boolean) => current?.setLocalExec(on),

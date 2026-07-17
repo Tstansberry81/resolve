@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useEngine } from "@/lib/useEngine";
+import { engine, useEngine } from "@/lib/useEngine";
 import type { AgentEvent, Goal, GoalStatus } from "@/lib/types";
 
 // Left rail: Missions as a dropdown section (open by default), and beneath it
@@ -50,6 +50,14 @@ function MissionCard({ goal }: { goal: Goal }) {
       <header>
         <span className="mission-cat">{goal.category}</span>
         <span className={`chip chip-${meta.tone}`}>{meta.label}</span>
+        <button
+          className="mission-dismiss"
+          title="Dismiss this mission"
+          aria-label={`Dismiss mission: ${goal.objective}`}
+          onClick={() => engine.dismissGoal(goal.id)}
+        >
+          ✕
+        </button>
       </header>
       <h3>{goal.objective}</h3>
       <div className="mission-bar">
