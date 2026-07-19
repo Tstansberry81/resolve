@@ -28,18 +28,18 @@ def online() -> bool:
 
 # ── offline watchdog (ticked once a minute by the routine scheduler) ─────────
 OFFLINE_ALERT_SECS = 120
+ALERT_COOLDOWN_SECS = 3600  # hard cap: at most ONE worker alert per hour
 KICKSTART_HINT = "launchctl kickstart -k gui/$(id -u)/com.resolve.localworker"
-_watch: dict[str, Any] = {"offline_since": None, "alerted": False}
+_watch: dict[str, Any] = {"offline_since": None, "alerted": False, "last_alert": 0.0}
 
 
 async def watchdog_tick() -> None:
     """Alert (bus event → Telegram) when the worker has been offline for a
-    while, and again when it recovers. At control-plane boot the worker counts
-    as offline until its first poll, so the 2-minute grace also covers deploys."""
+    while. At control-plane boot the worker counts as offline until its first
+    poll, so the 2-minute grace also covers deploys. Deliberately quiet:
+    recovery sends NOTHING (the vitals pill shows it), and alerts are capped
+    at one per hour no matter how often deploys/restarts make it flap."""
     if online():
-        if _watch["alerted"]:
-            await bus.emit("core", "system.worker_online",
-                           "Local worker is back online — laptop hands restored.")
         _watch["offline_since"] = None
         _watch["alerted"] = False
         return
@@ -47,8 +47,10 @@ async def watchdog_tick() -> None:
         _watch["offline_since"] = time.time()
         return
     down = time.time() - _watch["offline_since"]
-    if not _watch["alerted"] and down >= OFFLINE_ALERT_SECS:
+    if (not _watch["alerted"] and down >= OFFLINE_ALERT_SECS
+            and time.time() - _watch["last_alert"] >= ALERT_COOLDOWN_SECS):
         _watch["alerted"] = True
+        _watch["last_alert"] = time.time()
         await bus.emit(
             "core", "system.worker_offline",
             f"Local worker offline {int(down // 60)}m — laptop hands are down.",
