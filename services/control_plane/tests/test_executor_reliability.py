@@ -29,6 +29,47 @@ class IntentDetectionTest(unittest.TestCase):
         ]:
             self.assertTrue(executor._needs_action(t), t)
 
+    def test_synthesis_stall_flagged(self):
+        # the McIntire-plan step 3 stall: knew research existed, went looking, stopped
+        t = ("Based on the context provided in the task and what I found, I need to "
+             "gather the complete research information. The task indicates research has "
+             "been gathered but I need to locate it. Let me check for any notes or "
+             "output files:")
+        self.assertTrue(executor._needs_action(t), t)
+
+
+class PriorContextTest(unittest.TestCase):
+    def setUp(self):
+        executor._step_outputs.clear()
+
+    def tearDown(self):
+        executor._step_outputs.clear()
+
+    def test_prior_context_feeds_earlier_steps(self):
+        executor._step_outputs["g1"] = [
+            {"title": "Research admission", "outcome": "McIntire opens applications in April."},
+            {"title": "Research degree reqs", "outcome": "CoAS needs 120 credits."},
+        ]
+        ctx = executor._prior_context("g1")
+        self.assertIn("Research admission", ctx)
+        self.assertIn("McIntire opens applications", ctx)
+        self.assertIn("CoAS needs 120 credits", ctx)
+        self.assertIn("do NOT", ctx)  # instruction not to re-research
+
+    def test_no_prior_context_empty(self):
+        self.assertEqual(executor._prior_context("nope"), "")
+
+    def test_prior_context_bounded(self):
+        executor._step_outputs["g1"] = [{"title": "S", "outcome": "x" * 20000}]
+        self.assertLessEqual(len(executor._prior_context("g1")), executor._PRIOR_CHARS_CAP + 300)
+
+    def test_goal_accumulator_capped(self):
+        for i in range(10):
+            executor._step_outputs.setdefault(f"g{i}", []).append({"title": "t", "outcome": "o"})
+            while len(executor._step_outputs) > 6:
+                executor._step_outputs.pop(next(iter(executor._step_outputs)), None)
+        self.assertLessEqual(len(executor._step_outputs), 6)
+
     def test_real_output_not_flagged(self):
         for t in [
             "The Student Health and Wellness Center is located at 550 Brandon Ave, "

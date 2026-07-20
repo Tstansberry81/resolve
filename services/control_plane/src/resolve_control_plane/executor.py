@@ -49,6 +49,31 @@ WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search",
 queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 halted = False
 _current_step_task: "asyncio.Task | None" = None  # the step running right now
+
+# Per-goal accumulator of completed step outputs, so a later step (e.g. a
+# synthesis/'build the plan' step) can SEE what earlier steps found — steps run
+# in isolated model contexts otherwise, which is why synthesis steps stalled
+# with "research was gathered but I need to locate it". Capped + cleared per goal.
+_step_outputs: dict[str, list[dict[str, str]]] = {}
+_PRIOR_CHARS_CAP = 9000  # keep prior-step context bounded
+
+
+def _prior_context(goal_id: str) -> str:
+    prior = _step_outputs.get(goal_id) or []
+    if not prior:
+        return ""
+    blocks, used = [], 0
+    for p in prior:  # oldest→newest; trim if the running total gets large
+        chunk = f"### {p['title']}\n{p['outcome']}".strip()
+        if used + len(chunk) > _PRIOR_CHARS_CAP:
+            chunk = chunk[: max(0, _PRIOR_CHARS_CAP - used)]
+        blocks.append(chunk)
+        used += len(chunk)
+        if used >= _PRIOR_CHARS_CAP:
+            break
+    return ("\n\nRESULTS FROM EARLIER STEPS OF THIS SAME PLAN (use these — do NOT "
+            "re-research or go looking for files; the content is right here):\n\n"
+            + "\n\n".join(blocks))
 # When True (and a local model is configured + reachable), executor steps run on
 # Trav's local Qwen instead of Opus. The planner always stays on Opus. Toggled
 # live from the dashboard; falls back to Opus if the local box is unreachable.
@@ -242,9 +267,10 @@ _INTENT_RE = re.compile(
 # A trailing PROMISE to still-do-the-work: the model searched, narrated, then
 # ended on "let me compile/write/summarize/save…" without producing the result.
 _PROMISE_TAIL_RE = re.compile(
-    r"(let me|i'?ll|i will|now i'?ll|i'?m going to|going to)\s+"
+    r"(let me|i'?ll|i will|now i'?ll|i'?m going to|going to|i need to|i should|first i)\s+"
     r"(compile|summar|write|put together|create|draft|save|provide|give|lay out|"
-    r"organize|prepare)\S*[^.!?]*[.!?]?\s*$", re.IGNORECASE)
+    r"organize|prepare|check|look|locate|find|gather|review|search|pull|read|start)"
+    r"\S*[^.!?]*[.!?:]?\s*$", re.IGNORECASE)
 
 
 def _needs_action(text: str) -> bool:
@@ -389,6 +415,7 @@ async def _run_step(item: dict[str, Any]) -> None:
 
     context = (
         f"Goal: {item['objective']}\nStep: {title}\nInstructions: {item['instructions']}"
+        + _prior_context(goal_id)  # feed earlier steps' findings into this one
     )
 
     outcome = ""
@@ -415,6 +442,11 @@ async def _run_step(item: dict[str, Any]) -> None:
                        f"{title} — the executor didn't produce a result (no research/output). "
                        "Try asking again.", level="error", goal_id=goal_id)
         return
+
+    # Make this step's output available to later steps of the same plan.
+    _step_outputs.setdefault(goal_id, []).append({"title": title, "outcome": outcome})
+    while len(_step_outputs) > 6:  # bound memory: keep only recent goals' contexts
+        _step_outputs.pop(next(iter(_step_outputs)), None)
 
     # GUARANTEE the output lands in the vault — deterministic, not up to the LLM.
     saved_url, save_err = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome))
