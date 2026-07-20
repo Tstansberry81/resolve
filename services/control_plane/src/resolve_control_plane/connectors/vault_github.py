@@ -123,6 +123,7 @@ def search_files(query: str) -> dict:
         pass
     by_content: list[str] = []
     fragments: dict[str, list[str]] = {}
+    content_status = "ok"
     try:
         sr = requests.get(
             "https://api.github.com/search/code",
@@ -142,8 +143,14 @@ def search_files(query: str) -> dict:
                          for tm in (it.get("text_matches") or [])][:2]
                 if frags:
                     fragments[path] = frags
-    except Exception:
-        pass
+            if not by_content:
+                content_status = "no content hits"
+        else:
+            # surface WHY content search failed (403 = token type/scope,
+            # 422 = repo not indexed/query issue) instead of failing silent
+            content_status = f"http {sr.status_code}: {sr.text[:160]}"
+    except Exception as exc:
+        content_status = f"error: {exc}"
     seen: set[str] = set()
     merged: list[str] = []
     for p in by_name + by_content:  # filename hits first
@@ -151,4 +158,4 @@ def search_files(query: str) -> dict:
             seen.add(p)
             merged.append(p)
     return {"matches": merged[:30], "byName": by_name[:15], "byContent": by_content[:15],
-            "fragments": fragments}
+            "fragments": fragments, "contentSearch": content_status}
