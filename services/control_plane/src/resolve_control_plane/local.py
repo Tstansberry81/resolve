@@ -81,12 +81,23 @@ def next_task() -> dict[str, Any] | None:
     return _queue.pop(0) if _queue else None
 
 
+_RESULTS_CAP = 200
+
+
 def set_result(task_id: str, summary: str) -> None:
     _results[task_id] = summary
+    if len(_results) > _RESULTS_CAP:  # bound memory — evict oldest insertions
+        for k in list(_results)[:len(_results) - _RESULTS_CAP]:
+            _results.pop(k, None)
 
 
 def get_result(task_id: str) -> str | None:
     return _results.get(task_id)
+
+
+def pop_result(task_id: str) -> str | None:
+    """Read-and-remove — callers that consume a result shouldn't leak it."""
+    return _results.pop(task_id, None)
 
 
 # ── shell approvals (reuse the normal approval banner) ──────────────────────

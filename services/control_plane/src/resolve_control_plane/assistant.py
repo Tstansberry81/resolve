@@ -230,9 +230,9 @@ def _vault_search(query: str) -> dict[str, Any]:
         try:
             res = local.enqueue_action("vault_grep", query, f"Searching vault for “{query[:40]}”")
             task_id = res["taskId"]
-            for _ in range(12):  # worker idle-polls every 3s; grep is instant
+            for _ in range(16):  # worker idle-polls every 3s; grep itself is instant
                 time.sleep(0.75)
-                raw = local.get_result(task_id)
+                raw = local.pop_result(task_id)  # consume so a late result can't orphan
                 if raw is not None:
                     try:
                         grep = json.loads(raw)

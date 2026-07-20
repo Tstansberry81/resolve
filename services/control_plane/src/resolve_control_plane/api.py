@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 import time
@@ -22,12 +23,13 @@ app = FastAPI(title="RESOLVE Control Plane", version=__version__)
 
 @app.on_event("startup")
 async def _start_worker() -> None:
-    try:
-        await anyio.to_thread.run_sync(costs.load_seed)  # restore today's cost total
-        await anyio.to_thread.run_sync(artifacts.load_seed)  # restore artifact dock
-        await anyio.to_thread.run_sync(health.load_seed)  # restore latest Watch reading
-    except Exception:
-        pass
+    # Each seed independently — one failing (Supabase blip) must not skip the
+    # rest, and NONE may crash boot (an unstarted control plane is downtime).
+    for seed in (costs.load_seed, artifacts.load_seed, health.load_seed):
+        try:
+            await anyio.to_thread.run_sync(seed)
+        except Exception:
+            pass
     try:
         from .assistant import rehydrate_pending
         n = await rehydrate_pending()  # deploys no longer orphan pending approvals
@@ -40,27 +42,35 @@ async def _start_worker() -> None:
     asyncio.get_running_loop().create_task(routines.scheduler_loop())
 
 CP_TOKEN = os.getenv("CP_TOKEN", "")
+# Opt-in fail-open for genuine LOCAL dev only. In any real deploy CP_TOKEN is
+# set, so a MISSING token now fails CLOSED (503) instead of silently exposing
+# every endpoint — one unset env var used to make the whole API public.
+ALLOW_NO_AUTH = os.getenv("ALLOW_NO_AUTH", "").lower() in ("1", "true", "yes")
+# Token-shape hints in the 401 body help debug an iOS Shortcut but also leak
+# structure to an attacker — off unless explicitly enabled for a session.
+AUTH_DEBUG = os.getenv("AUTH_DEBUG", "").lower() in ("1", "true", "yes")
 
 
 def auth(request: Request) -> None:
-    """Bearer-token gate for /v1/*. Open when CP_TOKEN is unset (local dev).
-    Normalizes invisible whitespace (iOS Shortcuts pastes non-breaking spaces
-    and trailing newlines into header fields) — the token itself stays exact."""
+    """Bearer-token gate for /v1/*. Timing-safe; normalizes the invisible
+    whitespace iOS Shortcuts inject; accepts 'Bearer <token>' or the bare
+    token. Fails CLOSED when CP_TOKEN is unset unless ALLOW_NO_AUTH is set."""
     if not CP_TOKEN:
-        return
+        if ALLOW_NO_AUTH:
+            return
+        raise HTTPException(status_code=503,
+                            detail="server auth not configured (set CP_TOKEN)")
     header = (request.headers.get("authorization", "") or "")
-    header = header.replace(" ", " ").replace("\t", " ").strip()
-    header = " ".join(header.split())  # collapse doubled spaces after Bearer
-    # Accept "Bearer <token>" or the bare token (iOS Shortcuts users skip the
-    # scheme constantly); the secret comparison itself stays exact.
-    if header not in (f"Bearer {CP_TOKEN}", CP_TOKEN):
-        # Diagnosable rejection: fingerprint what ARRIVED (never the expected
-        # secret) so a phone-side mangling — autocapitalize, hidden chars,
-        # wrong header key — is visible in the error itself.
-        tok = header.removeprefix("Bearer ").strip()
-        got = (f"got {len(tok)} chars, starts {tok[:2]!r}, ends {tok[-2:]!r}"
-               if tok else "no Authorization header arrived at all")
-        raise HTTPException(status_code=401, detail=f"bad token ({got})")
+    header = header.replace("\u00a0", " ").replace("\t", " ").strip()
+    header = " ".join(header.split())
+    tok = header.removeprefix("Bearer ").strip()
+    # constant-time compare — a plain != leaks the token via response timing
+    if not hmac.compare_digest(tok, CP_TOKEN):
+        if AUTH_DEBUG:
+            got = (f"got {len(tok)} chars, starts {tok[:2]!r}, ends {tok[-2:]!r}"
+                   if tok else "no Authorization header arrived")
+            raise HTTPException(status_code=401, detail=f"bad token ({got})")
+        raise HTTPException(status_code=401, detail="bad token")
 
 
 @app.get("/")
@@ -74,12 +84,12 @@ def healthz() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
 
 
-@app.get("/v1/model-routes")
+@app.get("/v1/model-routes", dependencies=[Depends(auth)])
 def model_routes() -> dict:
     return load_json("model_routes.json")
 
 
-@app.get("/v1/model-routes/{role}")
+@app.get("/v1/model-routes/{role}", dependencies=[Depends(auth)])
 def model_route(role: str) -> dict[str, str]:
     try:
         choice = model_choice(role)
@@ -89,7 +99,7 @@ def model_route(role: str) -> dict[str, str]:
             "reasoning": choice.reasoning}
 
 
-@app.get("/v1/connectors")
+@app.get("/v1/connectors", dependencies=[Depends(auth)])
 def connectors() -> dict:
     return load_json("connectors.json")
 

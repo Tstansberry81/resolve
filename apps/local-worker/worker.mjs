@@ -179,6 +179,35 @@ async function walk(dir, out, base) {
   }
 }
 
+// SSRF guard: only http(s), and refuse hosts that resolve to loopback/private/
+// link-local ranges (cloud metadata 169.254.169.254, localhost, LAN, etc.).
+function safeHttpUrl(raw) {
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error(`bad url: ${raw.slice(0, 80)}`);
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error(`blocked scheme ${u.protocol} — only http/https`);
+  }
+  const host = u.hostname.toLowerCase();
+  const blockedName = host === "localhost" || host.endsWith(".local")
+    || host.endsWith(".internal") || host === "metadata.google.internal";
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  let blockedIp = false;
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    blockedIp = a === 127 || a === 10 || a === 0 || a === 169  // loopback, private, link-local
+      || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)
+      || a >= 224;  // multicast/reserved
+  }
+  if (blockedName || blockedIp || host === "[::1]" || host.startsWith("[fd") || host.startsWith("[fe80")) {
+    throw new Error(`blocked host ${host} — refusing internal/loopback address`);
+  }
+  return u.href;
+}
+
 function htmlToText(html) {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -212,9 +241,15 @@ async function runTool(taskId, name, args) {
     return out.filter((p) => p.toLowerCase().includes(q)).slice(0, 60).join("\n") || "(no matches)";
   }
   if (name === "web_read") {
-    const r = await fetch(String(args.url), { redirect: "follow" });
-    const body = await r.text();
-    return htmlToText(body).slice(0, 12000);
+    const url = safeHttpUrl(String(args.url || ""));  // block SSRF: scheme + private IPs
+    const r = await fetch(url, { redirect: "manual" });  // don't auto-follow into internal hosts
+    if (r.status >= 300 && r.status < 400) {
+      const loc = r.headers.get("location") || "";
+      // one manual hop, re-validated — a public page redirecting to metadata IP is the attack
+      const r2 = await fetch(safeHttpUrl(new URL(loc, url).href), { redirect: "manual" });
+      return htmlToText(await r2.text()).slice(0, 12000);
+    }
+    return htmlToText(await r.text()).slice(0, 12000);
   }
   if (name === "vault_read") {
     return (await fs.readFile(vaultPath(args.path), "utf8")).slice(0, 16000);
