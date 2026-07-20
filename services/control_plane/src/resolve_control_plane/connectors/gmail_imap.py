@@ -65,34 +65,20 @@ def inbox_recent(limit: int = 25, days: int | None = None) -> dict:
             _, data = m.uid("search", None, "ALL")
         uids = (data[0] or b"").split()[-lim:]
         out = []
-        by_uid: dict[bytes, tuple[bytes, bytes]] = {}
-        if uids:
-            # One batched FETCH. Gmail may put "UID n"/FLAGS BEFORE the body
-            # literal (in the tuple head) or AFTER it (in the next plain-bytes
-            # element, e.g. b' UID 123 FLAGS (\\Seen))') — scan both.
-            _, md = m.uid("fetch", b",".join(uids), "(UID FLAGS BODY.PEEK[]<0.4096>)")
-            items = list(md or [])
-            for i, p in enumerate(items):
-                if not isinstance(p, tuple) or len(p) < 2:
-                    continue
-                tail = items[i + 1] if (i + 1 < len(items)
-                                        and isinstance(items[i + 1], (bytes, bytearray))) else b""
-                meta = (p[0] or b"") + b" " + bytes(tail)
-                mu = re.search(rb"UID (\d+)", meta)
-                if mu:
-                    by_uid[mu.group(1)] = (meta, p[1] or b"")
         for u in reversed(uids):  # newest first
-            meta, raw = by_uid.get(u, (b"", b""))
+            # Full BODY.PEEK[] per message — the exact fetch the vault1 bot has
+            # run in production for months. Partial fetches (<0.N>) came back
+            # with EMPTY headers from Gmail via imaplib (verified live) — do
+            # not "optimize" this back to a partial or batched fetch without
+            # re-verifying against the real account.
+            try:
+                _, md1 = m.uid("fetch", u, "(FLAGS BODY.PEEK[])")
+                raw = b"".join(x[1] for x in md1 if isinstance(x, tuple))
+                meta = b" ".join(x[0] for x in md1 if isinstance(x, tuple))
+            except Exception:
+                continue
             if not raw:
-                # batch parse missed this one — fall back to a single fetch
-                try:
-                    _, md1 = m.uid("fetch", u, "(FLAGS BODY.PEEK[]<0.4096>)")
-                    raw = b"".join(x[1] for x in md1 if isinstance(x, tuple))
-                    meta = b" ".join(x[0] for x in md1 if isinstance(x, tuple))
-                except Exception:
-                    continue
-                if not raw:
-                    continue
+                continue
             try:
                 msg = email.message_from_bytes(raw)
                 snippet = ""
