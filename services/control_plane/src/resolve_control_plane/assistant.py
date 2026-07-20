@@ -265,6 +265,10 @@ def _save_to_vault(title: str, content: str, category: str = "output") -> dict[s
     stamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M")
     body = f"# {title}\n\n*saved by RESOLVE · {stamp}*\n\n{content.strip()}\n"
     vault_github.write_file(path, body, message=f"agent: save {title[:60]}")
+    try:
+        artifacts.record_vault(path, action="created")  # show it in the Artifacts dock
+    except Exception:
+        pass  # dock logging must never break the save
     url = f"https://github.com/{vault_github.VAULT_REPO}/blob/main/{path}"
     return {"saved": True, "path": path, "url": url, "title": title}
 

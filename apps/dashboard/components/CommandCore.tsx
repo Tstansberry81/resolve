@@ -52,14 +52,16 @@ export function CommandCore() {
   const [text, setText] = useState("");
   const [listening, setListening] = useState(false);
   const [flare, setFlare] = useState(false);
+  const [justDone, setJustDone] = useState(false);  // holds a green "COMPLETE" state
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const activeRef = useRef(false);
   activeRef.current = voice.active;
   const flareSeenRef = useRef<number | null>(null);
 
-  // Green flare when a mission/step completes. Event ids are monotonic, so we
-  // track the newest completion we've flared for (order-independent) and skip
-  // whatever was already in the feed at mount.
+  // When a mission/step completes: fire the flare AND hold a clear green
+  // "COMPLETE" state for a few seconds, so the finish is easy to catch instead
+  // of a sub-second flash that drops straight to idle. Event ids are monotonic,
+  // so we track the newest completion seen and skip the feed present at mount.
   useEffect(() => {
     let newest = -1;
     for (const e of events) {
@@ -74,10 +76,21 @@ export function CommandCore() {
     if (newest > flareSeenRef.current) {
       flareSeenRef.current = newest;
       setFlare(true);
-      const t = setTimeout(() => setFlare(false), 1600);
-      return () => clearTimeout(t);
+      setJustDone(true);
+      const tFlare = setTimeout(() => setFlare(false), 1600);
+      const tDone = setTimeout(() => setJustDone(false), 4200);  // lingering green ✓
+      return () => {
+        clearTimeout(tFlare);
+        clearTimeout(tDone);
+      };
     }
   }, [events]);
+
+  // While a task runs the orb is executing/thinking; on finish it flips to
+  // idle. Suppress the green "COMPLETE" hold if a NEW turn already started
+  // (don't show done over live work).
+  const busyNow = orb === "executing" || orb === "thinking" || voice.active;
+  const showDone = justDone && !busyNow;
 
   const submit = () => {
     const t = text.trim();
@@ -463,15 +476,17 @@ export function CommandCore() {
 
   const micActive = listening || voice.active;
 
+  const displayState = voice.active ? "listening" : showDone ? "complete" : orb;
+
   return (
     <div className="core-v2">
-      <span className="core-state" data-state={voice.active ? "listening" : orb}>
-        {voice.active ? "VOICE MODE" : STATE_LABEL[orb]}
+      <span className="core-state" data-state={displayState}>
+        {voice.active ? "VOICE MODE" : showDone ? "✓ COMPLETE" : STATE_LABEL[orb]}
       </span>
 
       <div
         className="orb-stage"
-        data-state={voice.active ? "listening" : orb}
+        data-state={displayState}
         data-voice={voice.active}
         data-flare={flare}
       >
@@ -484,7 +499,9 @@ export function CommandCore() {
       </div>
 
       <p className="orb-caption">
-        {voice.active ? (listening ? "Listening…" : "Voice mode — say “stand down” to stop") : orbCaption}
+        {voice.active
+          ? (listening ? "Listening…" : "Voice mode — say “stand down” to stop")
+          : showDone ? "Done — task complete" : orbCaption}
       </p>
 
       <div className="command-bar">

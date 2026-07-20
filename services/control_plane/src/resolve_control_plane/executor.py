@@ -22,7 +22,7 @@ import anyio
 
 import re
 
-from . import bus, costs, store
+from . import artifacts, bus, costs, store
 from .connectors import local_llm, vault_github
 from .msgutil import cached_system, compact_messages
 from .domain import AutonomyMode
@@ -388,6 +388,10 @@ def _autosave_output(title: str, outcome: str) -> str | None:
     try:
         vault_github.write_file(path, f"# {title}\n\n{outcome.strip()}\n",
                                 message=f"agent: save {title[:50]}")
+        try:
+            artifacts.record_vault(path, action="created")  # → Artifacts dock
+        except Exception:
+            pass
         return f"https://github.com/{vault_github.VAULT_REPO}/blob/main/{path}"
     except Exception:
         return None

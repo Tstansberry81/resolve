@@ -348,6 +348,7 @@ body::before {
 .core-state[data-state="thinking"] { color: var(--blue); border-color: rgba(90, 131, 255, 0.4); background: var(--blue-dim); }
 .core-state[data-state="executing"] { color: var(--cyan); border-color: rgba(62, 224, 255, 0.4); background: var(--cyan-dim); }
 .core-state[data-state="waiting"] { color: var(--amber); border-color: rgba(255, 176, 31, 0.4); background: var(--amber-dim); }
+.core-state[data-state="complete"] { color: #35e39c; border-color: rgba(53, 227, 156, 0.55); background: rgba(53, 227, 156, 0.14); }
 
 .orb-stage {
   position: relative;
@@ -365,6 +366,7 @@ body::before {
 .orb-stage[data-state="thinking"] { --orb-color: var(--blue); --orb-speed: 3.6s; }
 .orb-stage[data-state="executing"] { --orb-color: var(--cyan); --orb-speed: 1.8s; }
 .orb-stage[data-state="waiting"] { --orb-color: var(--amber); --orb-speed: 4.5s; }
+.orb-stage[data-state="complete"] { --orb-color: #35e39c; --orb-speed: 2.4s; }
 
 .orb-halo {
   position: absolute;
