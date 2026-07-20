@@ -34,11 +34,10 @@ _watch: dict[str, Any] = {"offline_since": None, "alerted": False, "last_alert":
 
 
 async def watchdog_tick() -> None:
-    """Alert (bus event → Telegram) when the worker has been offline for a
-    while. At control-plane boot the worker counts as offline until its first
-    poll, so the 2-minute grace also covers deploys. Deliberately quiet:
-    recovery sends NOTHING (the vitals pill shows it), and alerts are capped
-    at one per hour no matter how often deploys/restarts make it flap."""
+    """Log a dashboard event when the worker has been offline for a while.
+    NO Telegram (per Trav): the event lands in the dashboard event log only;
+    the vitals pill shows live status. Still one event max per hour, and
+    recovery is silent."""
     if online():
         _watch["offline_since"] = None
         _watch["alerted"] = False

@@ -32,7 +32,8 @@ NOTIFY_TYPES = {
     "task.completed": "✅ Executor",
     "task.failed": "⚠️ Executor",
     "system.emergency_stop": "🛑 RESOLVE",
-    "system.worker_offline": "🔌 RESOLVE",
+    # worker liveness deliberately NOT here — Trav said no Telegram pings about
+    # the worker; the vitals pill + dashboard event log carry it instead.
 }
 
 
