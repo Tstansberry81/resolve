@@ -38,8 +38,12 @@ EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-haiku-4-5-20251001")
 MAX_STEP_TURNS = int(os.getenv("EXECUTOR_MAX_STEP_TURNS", "4"))
 
 # Anthropic server-side web search — lets the executor research mid-step. Capped
-# low so a research task can't quietly rack up a big bill.
+# low so a research task can't quietly rack up a big bill. allowed_callers pins
+# the tool to DIRECT invocation: the Haiku-tier models (planner/executor) don't
+# support programmatic tool calling, and web_search now defaults to requiring it
+# unless we say otherwise — without this, every research step 400s.
 WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search",
+                   "allowed_callers": ["direct"],
                    "max_uses": int(os.getenv("EXECUTOR_WEB_MAX_USES", "3"))}
 
 queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
