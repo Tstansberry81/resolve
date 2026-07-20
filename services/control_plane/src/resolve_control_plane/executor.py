@@ -252,9 +252,13 @@ async def _execute_opus(item: dict[str, Any], context: str) -> str:
             tools=TOOLS + [WEB_SEARCH_TOOL], messages=messages,
         )
         costs.record("executor", EXECUTOR_MODEL, resp.usage)
-        texts = [b.text for b in resp.content if b.type == "text"]
+        # Join ALL text blocks, not just the last: a web_search answer comes back
+        # as several text blocks interleaved with citations, so texts[-1] was only
+        # the trailing fragment — the research body was being dropped (empty
+        # outcome → no vault note saved).
+        texts = [b.text for b in resp.content if b.type == "text" and b.text.strip()]
         if texts:
-            outcome = texts[-1]
+            outcome = "\n".join(texts).strip()
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
         # pause_turn: server-side web search hit its loop cap; resend to resume.
         if resp.stop_reason == "pause_turn":
