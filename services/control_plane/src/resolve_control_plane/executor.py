@@ -235,6 +235,21 @@ async def _dispatch_tool(name: str, args: dict[str, Any], goal_id: str) -> tuple
         return f"Error: {exc}", True
 
 
+_INTENT_RE = re.compile(
+    r"^\s*(i'?ll\b|i will\b|let me\b|i'?m going to\b|i am going to\b|i can\b|"
+    r"i'?d\b|first,? i|to (research|find|do|answer)|sure[,!. ]|okay[,!. ]|"
+    r"here'?s what i'?ll)", re.IGNORECASE)
+
+
+def _looks_like_intent(text: str) -> bool:
+    """True when the text reads as a PROMISE to act rather than the actual result
+    (the 'I'll research…' hallucination). Short + intent-opener = no real work."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    return len(t) < 240 and bool(_INTENT_RE.match(t))
+
+
 async def _execute_opus(item: dict[str, Any], context: str) -> str:
     """Anthropic tool-use loop on the executor model (default backend). The static
     preamble + tools are prompt-cached; ``context`` is the per-step detail."""
@@ -245,7 +260,9 @@ async def _execute_opus(item: dict[str, Any], context: str) -> str:
     system = cached_system(EXECUTOR_PREAMBLE, context)
     messages: list[dict[str, Any]] = [{"role": "user", "content": f"Execute the step now: {title}"}]
     outcome = ""
-    for _ in range(MAX_STEP_TURNS):
+    used_tool = False       # did the model actually DO anything (search/read/write)?
+    nudges = 0
+    for _ in range(MAX_STEP_TURNS + 2):
         compact_messages(messages)  # trim stale tool_result blobs from the transcript
         resp = await client.messages.create(
             model=EXECUTOR_MODEL, max_tokens=1500, system=system,
@@ -260,11 +277,26 @@ async def _execute_opus(item: dict[str, Any], context: str) -> str:
         if texts:
             outcome = "\n".join(texts).strip()
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
+        server_tool = any(b.type in ("server_tool_use", "web_search_tool_result")
+                          for b in resp.content)
+        if tool_uses or server_tool:
+            used_tool = True
         # pause_turn: server-side web search hit its loop cap; resend to resume.
         if resp.stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": resp.content})
             continue
         if resp.stop_reason != "tool_use" or not tool_uses:
+            # The model may have NARRATED intent ("I'll research…") and stopped
+            # without doing anything — the #1 reliability failure. If it took no
+            # action and the outcome reads like a promise, force it to act.
+            if not used_tool and nudges < 2 and _looks_like_intent(outcome):
+                nudges += 1
+                messages.append({"role": "assistant", "content": resp.content})
+                messages.append({"role": "user", "content": (
+                    "Stop — you described what you'd do but took NO action. Do it NOW: "
+                    "call web_search (and any other tool you need), then write the FULL "
+                    "findings as your final message. Do not narrate intent again.")})
+                continue
             break
         messages.append({"role": "assistant", "content": resp.content})
         results = []
@@ -273,7 +305,7 @@ async def _execute_opus(item: dict[str, Any], context: str) -> str:
             results.append({"type": "tool_result", "tool_use_id": tu.id,
                             "content": content, "is_error": is_err})
         messages.append({"role": "user", "content": results})
-    return outcome
+    return outcome if (used_tool or not _looks_like_intent(outcome)) else ""
 
 
 def _openai_tools() -> list[dict[str, Any]]:
@@ -364,8 +396,21 @@ async def _run_step(item: dict[str, Any]) -> None:
     if backend != "local Qwen":
         outcome = await _execute_opus(item, context)
 
+    # HONESTY: if the step produced nothing real (model narrated intent then
+    # stalled, or errored out empty), don't report a cheerful "Done" — say it
+    # plainly so Trav knows to retry, and mark the task failed.
+    if not (outcome or "").strip():
+        await _mark_task(item["task_id"], "failed")
+        await bus.emit("executor", "task.failed",
+                       f"{title} — the executor didn't produce a result (no research/output). "
+                       "Try asking again.", level="error", goal_id=goal_id)
+        return
+
     # GUARANTEE the output lands in the vault — deterministic, not up to the LLM.
-    saved_url = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome))
+    saved_url, save_err = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome))
+    if save_err:  # surface a real save failure instead of silently "succeeding"
+        await bus.emit("executor", "task.note", f"⚠ Couldn't save to vault: {save_err}",
+                       level="error", goal_id=goal_id)
 
     await _mark_task(item["task_id"], "succeeded")
     detail = outcome or None
@@ -375,18 +420,27 @@ async def _run_step(item: dict[str, Any]) -> None:
                    detail=detail, level="success", goal_id=goal_id)
 
 
-def _autosave_output(title: str, outcome: str) -> str | None:
-    """Persist a step's output to the vault: a brief log line always, plus a full
-    note when there's substantial content. Best-effort; never breaks the step."""
-    if not vault_github.configured() or not (outcome or "").strip():
-        return None
+# Any output past this saves as a full note. Was 300 (dropped concise but real
+# answers to a log line only); a couple of sentences is worth a page.
+SAVE_NOTE_MIN = int(os.getenv("EXECUTOR_SAVE_NOTE_MIN", "80"))
+
+
+def _autosave_output(title: str, outcome: str) -> tuple[str | None, str | None]:
+    """Persist a step's output to the vault: brief log line always, plus a full
+    wiki/output note for anything substantial. Returns (url, error): url when a
+    note was written, error when the GitHub write actually FAILED (so the caller
+    can surface it instead of a silent success)."""
+    if not (outcome or "").strip():
+        return None, None
+    if not vault_github.configured():
+        return None, "vault not configured (GITHUB_TOKEN missing)"
     brief = " ".join(outcome.split())[:200]
     try:
         vault_github.append_log(f"executor · {title[:60]}", [f"- {brief}"])
     except Exception:
-        pass
-    if len(outcome.strip()) <= 300:
-        return None
+        pass  # the log line is nice-to-have; the note below is the real save
+    if len(outcome.strip()) < SAVE_NOTE_MIN:
+        return None, None  # genuinely tiny (a number, a yes/no) — log line suffices
     slug = (re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60]) or "research"
     path = f"wiki/output/{slug}.md"
     try:
@@ -396,9 +450,9 @@ def _autosave_output(title: str, outcome: str) -> str | None:
             artifacts.record_vault(path, action="created")  # → Artifacts dock
         except Exception:
             pass
-        return f"https://github.com/{vault_github.VAULT_REPO}/blob/main/{path}"
-    except Exception:
-        return None
+        return f"https://github.com/{vault_github.VAULT_REPO}/blob/main/{path}", None
+    except Exception as exc:
+        return None, str(exc)[:160]  # surfaced by the caller, not swallowed
 
 
 def is_working() -> bool:
