@@ -51,7 +51,9 @@ def auth(request: Request) -> None:
     header = (request.headers.get("authorization", "") or "")
     header = header.replace(" ", " ").replace("\t", " ").strip()
     header = " ".join(header.split())  # collapse doubled spaces after Bearer
-    if header != f"Bearer {CP_TOKEN}":
+    # Accept "Bearer <token>" or the bare token (iOS Shortcuts users skip the
+    # scheme constantly); the secret comparison itself stays exact.
+    if header not in (f"Bearer {CP_TOKEN}", CP_TOKEN):
         raise HTTPException(status_code=401, detail="bad token")
 
 
