@@ -25,6 +25,7 @@ TOOL_POLICY = {
     "get_finance": ("finance.read", "finance"),
     "get_health": ("health.read", "health"),
     "get_recent_activity": ("activity.read", "vault"),
+    "get_audit_log": ("activity.read", "vault"),
     "run_on_laptop": ("laptop.dispatch", "local"),
     "open_folder": ("laptop.display", "local"),
     "reveal_in_finder": ("laptop.display", "local"),
@@ -258,6 +259,18 @@ TOOLS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {"days": {"type": "integer", "description": "How many days back (default 7, max 14)"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_audit_log",
+        "description": "Security/transparency ledger: the actions RESOLVE actually took and approvals it requested/you decided (tools run, emails sent/archived, events created, deletes, failures) over the last N hours. Use for 'what did you do?', 'what did I approve?', 'did anything fail?', or a security review. Set sensitive=true to see only high-impact actions (sends, deletes, archives, budget, failures).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "integer", "description": "Look-back window in hours (default 24)"},
+                "sensitive": {"type": "boolean", "description": "Only high-impact actions"},
+            },
             "additionalProperties": False,
         },
     },

@@ -151,6 +151,10 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "get_recent_activity":
         from . import ingest
         return {"activity": ingest.gather_recent(min(int(args.get("days", 7)), 14))[:20000]}
+    if name == "get_audit_log":
+        from . import audit
+        return audit.recent(hours=int(args.get("hours", 24)),
+                            sensitive_only=bool(args.get("sensitive", False)))
     if name == "run_on_laptop":
         from . import local
         return local.enqueue(str(args["task"]))

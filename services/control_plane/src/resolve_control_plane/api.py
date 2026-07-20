@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import __version__, artifacts, bus, costs, executor, health, local, routines, store
+from . import __version__, artifacts, audit, bus, costs, executor, health, local, routines, store
 from .connectors import local_llm, simplefin
 from .assistant import (
     CONNECTOR_AVAILABLE, decide_approval, pending_actions, queue_status, run_command,
@@ -222,6 +222,13 @@ async def health_post(body: dict) -> dict:
 @app.get("/v1/health", dependencies=[Depends(auth)])
 async def health_get() -> dict:
     return {"latest": health.latest()}
+
+
+@app.get("/v1/audit", dependencies=[Depends(auth)])
+async def audit_log(hours: int = 24, limit: int = 60, sensitive: bool = False) -> dict:
+    """Human-facing action ledger: what RESOLVE did / what was approved."""
+    return await anyio.to_thread.run_sync(
+        lambda: audit.recent(hours=hours, limit=limit, sensitive_only=sensitive))
 
 
 @app.get("/v1/goals/{goal_id}/reply", dependencies=[Depends(auth)])
