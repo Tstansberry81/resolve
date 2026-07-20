@@ -54,7 +54,13 @@ def auth(request: Request) -> None:
     # Accept "Bearer <token>" or the bare token (iOS Shortcuts users skip the
     # scheme constantly); the secret comparison itself stays exact.
     if header not in (f"Bearer {CP_TOKEN}", CP_TOKEN):
-        raise HTTPException(status_code=401, detail="bad token")
+        # Diagnosable rejection: fingerprint what ARRIVED (never the expected
+        # secret) so a phone-side mangling — autocapitalize, hidden chars,
+        # wrong header key — is visible in the error itself.
+        tok = header.removeprefix("Bearer ").strip()
+        got = (f"got {len(tok)} chars, starts {tok[:2]!r}, ends {tok[-2:]!r}"
+               if tok else "no Authorization header arrived at all")
+        raise HTTPException(status_code=401, detail=f"bad token ({got})")
 
 
 @app.get("/")
