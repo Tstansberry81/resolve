@@ -43,10 +43,14 @@ CP_TOKEN = os.getenv("CP_TOKEN", "")
 
 
 def auth(request: Request) -> None:
-    """Bearer-token gate for /v1/*. Open when CP_TOKEN is unset (local dev)."""
+    """Bearer-token gate for /v1/*. Open when CP_TOKEN is unset (local dev).
+    Normalizes invisible whitespace (iOS Shortcuts pastes non-breaking spaces
+    and trailing newlines into header fields) — the token itself stays exact."""
     if not CP_TOKEN:
         return
-    header = request.headers.get("authorization", "")
+    header = (request.headers.get("authorization", "") or "")
+    header = header.replace(" ", " ").replace("\t", " ").strip()
+    header = " ".join(header.split())  # collapse doubled spaces after Bearer
     if header != f"Bearer {CP_TOKEN}":
         raise HTTPException(status_code=401, detail="bad token")
 
