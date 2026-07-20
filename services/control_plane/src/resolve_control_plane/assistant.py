@@ -128,7 +128,7 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "vault_read":
         if args.get("path"):
             return vault_github.read_file(str(args["path"]))
-        return vault_github.search_files(str(args.get("query", "")))
+        return _vault_search(str(args.get("query", "")))
     if name == "delete_task":
         notion_api.archive_page(str(args["page_id"]))
         return {"archived": True, "page_id": args["page_id"], "title": args.get("title", "")}
@@ -216,6 +216,37 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "delete_google_file":
         return composio.delete_file(str(args["file_id"]))
     raise ValueError(f"unknown tool {name}")
+
+
+def _vault_search(query: str) -> dict[str, Any]:
+    """Vault search, content-first: when the laptop worker is online, a
+    structured vault_grep action greps the REAL on-disk vault (instant, exact,
+    with line fragments — GitHub's code-search index skips this private repo's
+    contents). Falls back to the GitHub name/content search when it's offline.
+    Runs inside the tool thread, so the short wait doesn't block the loop."""
+    from . import local
+
+    if local.online():
+        try:
+            res = local.enqueue_action("vault_grep", query, f"Searching vault for “{query[:40]}”")
+            task_id = res["taskId"]
+            for _ in range(12):  # worker idle-polls every 3s; grep is instant
+                time.sleep(0.75)
+                raw = local.get_result(task_id)
+                if raw is not None:
+                    try:
+                        grep = json.loads(raw)
+                    except ValueError:
+                        break
+                    gh = vault_github.search_files(query)  # filenames still useful
+                    return {"matches": [m.get("path") for m in grep.get("matches", [])],
+                            "fragments": {m["path"]: m.get("fragments", [])
+                                          for m in grep.get("matches", []) if m.get("path")},
+                            "byName": gh.get("byName", []),
+                            "source": "laptop grep (exact content match)"}
+        except Exception:
+            pass  # worker hiccup — GitHub fallback below
+    return vault_github.search_files(query)
 
 
 def _slug(title: str) -> str:

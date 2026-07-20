@@ -85,6 +85,10 @@ def set_result(task_id: str, summary: str) -> None:
     _results[task_id] = summary
 
 
+def get_result(task_id: str) -> str | None:
+    return _results.get(task_id)
+
+
 # ── shell approvals (reuse the normal approval banner) ──────────────────────
 def request_approval(task_id: str, summary: str, detail: str, risk: str = "local_shell") -> str:
     approval_id = str(uuid.uuid4())

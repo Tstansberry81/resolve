@@ -389,6 +389,50 @@ async function runTask(taskId, task) {
   return summary;
 }
 
+// ── vault content grep (structured action — no LLM, instant, $0) ────────────
+// The vault lives on this disk, so content search is a local read: walk md/txt
+// files, case-insensitive substring match, return path + matching line
+// fragments. GitHub's code-search index skips this private repo's contents, so
+// the laptop IS the content-search backend when online.
+async function vaultGrep(query) {
+  const q = String(query || "").toLowerCase().trim();
+  if (!q) return [];
+  const hits = [];
+  async function walkVault(dir) {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (hits.length >= 20) return;
+      if (e.name.startsWith(".") || e.name === "node_modules") continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        await walkVault(full);
+      } else if (/\.(md|txt)$/i.test(e.name)) {
+        try {
+          const st = await fs.stat(full);
+          if (st.size > 1024 * 1024) continue;
+          const text = await fs.readFile(full, "utf8");
+          if (!text.toLowerCase().includes(q)) continue;
+          const fragments = [];
+          for (const line of text.split("\n")) {
+            if (line.toLowerCase().includes(q)) {
+              fragments.push(line.trim().slice(0, 200));
+              if (fragments.length >= 2) break;
+            }
+          }
+          hits.push({ path: path.relative(VAULT, full), fragments });
+        } catch { /* unreadable file — skip */ }
+      }
+    }
+  }
+  await walkVault(VAULT);
+  return hits;
+}
+
 // ── structured "open" actions (folders / apps / websites) ───────────────────
 // Safe, non-destructive display actions dispatched straight from the cloud — no
 // LLM, no approval. Uses macOS `open` via execFile (no shell, so no injection).
@@ -468,7 +512,15 @@ async function main() {
       if (pollFails) console.log(`poll recovered after ${pollFails} failure(s)`);
       pollFails = 0;
       if (job && job.taskId) {
-        if (job.action && job.action.kind === "restart") {
+        if (job.action && job.action.kind === "vault_grep") {
+          console.log(`> vault_grep ${job.taskId}: ${String(job.action.value).slice(0, 60)}`);
+          const matches = await vaultGrep(job.action.value).catch(() => []);
+          await cp("/v1/local/result", {
+            method: "POST",
+            body: JSON.stringify({ taskId: job.taskId,
+              summary: JSON.stringify({ matches }).slice(0, 8000) }),
+          }).catch(() => {});
+        } else if (job.action && job.action.kind === "restart") {
           // cloud-pushed restart: confirm, then exit — launchd relaunches with fresh code
           console.log(`> restart requested by the control plane (${job.taskId})`);
           await cp("/v1/local/result", { method: "POST", body: JSON.stringify({ taskId: job.taskId, summary: "Worker restarting — back in a few seconds." }) }).catch(() => {});
