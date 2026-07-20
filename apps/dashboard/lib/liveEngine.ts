@@ -21,6 +21,7 @@ const ALL_CONNECTORS: ConnectorHealth[] = [
   { id: "notion", label: "Notion", status: "down", latencyMs: 0 },
   { id: "google", label: "Google", status: "down", latencyMs: 0 },
   { id: "finance", label: "Finance", status: "down", latencyMs: 0 },
+  { id: "health", label: "Health (Watch)", status: "down", latencyMs: 0 },
   { id: "local", label: "Laptop", status: "down", latencyMs: 0 },
   { id: "web", label: "Web", status: "down", latencyMs: 0 },
 ];
