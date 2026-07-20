@@ -239,15 +239,28 @@ _INTENT_RE = re.compile(
     r"^\s*(i'?ll\b|i will\b|let me\b|i'?m going to\b|i am going to\b|i can\b|"
     r"i'?d\b|first,? i|to (research|find|do|answer)|sure[,!. ]|okay[,!. ]|"
     r"here'?s what i'?ll)", re.IGNORECASE)
+# A trailing PROMISE to still-do-the-work: the model searched, narrated, then
+# ended on "let me compile/write/summarize/save…" without producing the result.
+_PROMISE_TAIL_RE = re.compile(
+    r"(let me|i'?ll|i will|now i'?ll|i'?m going to|going to)\s+"
+    r"(compile|summar|write|put together|create|draft|save|provide|give|lay out|"
+    r"organize|prepare)\S*[^.!?]*[.!?]?\s*$", re.IGNORECASE)
 
 
-def _looks_like_intent(text: str) -> bool:
-    """True when the text reads as a PROMISE to act rather than the actual result
-    (the 'I'll research…' hallucination). Short + intent-opener = no real work."""
+def _needs_action(text: str) -> bool:
+    """True when `text` is a promise to act rather than the actual result — the
+    'I'll research…' / 'let me compile this now' stall. Empty counts too."""
     t = (text or "").strip()
     if not t:
         return True
-    return len(t) < 240 and bool(_INTENT_RE.match(t))
+    if len(t) < 240 and _INTENT_RE.match(t):
+        return True
+    # ends by promising to compile/write the answer → it never delivered it
+    return bool(_PROMISE_TAIL_RE.search(t[-200:]))
+
+
+# back-compat alias
+_looks_like_intent = _needs_action
 
 
 async def _execute_opus(item: dict[str, Any], context: str) -> str:
@@ -260,42 +273,38 @@ async def _execute_opus(item: dict[str, Any], context: str) -> str:
     system = cached_system(EXECUTOR_PREAMBLE, context)
     messages: list[dict[str, Any]] = [{"role": "user", "content": f"Execute the step now: {title}"}]
     outcome = ""
-    used_tool = False       # did the model actually DO anything (search/read/write)?
     nudges = 0
-    for _ in range(MAX_STEP_TURNS + 2):
+    for _ in range(MAX_STEP_TURNS + 3):  # headroom for search turns + a compile turn
         compact_messages(messages)  # trim stale tool_result blobs from the transcript
         resp = await client.messages.create(
-            model=EXECUTOR_MODEL, max_tokens=1500, system=system,
+            model=EXECUTOR_MODEL, max_tokens=2500, system=system,
             tools=TOOLS + [WEB_SEARCH_TOOL], messages=messages,
         )
         costs.record("executor", EXECUTOR_MODEL, resp.usage)
-        # Join ALL text blocks, not just the last: a web_search answer comes back
-        # as several text blocks interleaved with citations, so texts[-1] was only
-        # the trailing fragment — the research body was being dropped (empty
-        # outcome → no vault note saved).
+        # This turn's text (server web_search interleaves several text blocks with
+        # citations within ONE response, so join them all — texts[-1] alone lost
+        # the body). Keep the last SUBSTANTIVE turn as the outcome.
         texts = [b.text for b in resp.content if b.type == "text" and b.text.strip()]
-        if texts:
-            outcome = "\n".join(texts).strip()
+        turn_text = "\n".join(texts).strip()
+        if turn_text:
+            outcome = turn_text
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
-        server_tool = any(b.type in ("server_tool_use", "web_search_tool_result")
-                          for b in resp.content)
-        if tool_uses or server_tool:
-            used_tool = True
         # pause_turn: server-side web search hit its loop cap; resend to resume.
         if resp.stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": resp.content})
             continue
         if resp.stop_reason != "tool_use" or not tool_uses:
-            # The model may have NARRATED intent ("I'll research…") and stopped
-            # without doing anything — the #1 reliability failure. If it took no
-            # action and the outcome reads like a promise, force it to act.
-            if not used_tool and nudges < 2 and _looks_like_intent(outcome):
+            # The model stopped. If what it produced is a PROMISE ("I'll research…"
+            # / "let me compile this now") rather than the actual result — the #1
+            # reliability failure — force it to deliver, whether or not it searched.
+            if nudges < 3 and _needs_action(outcome):
                 nudges += 1
                 messages.append({"role": "assistant", "content": resp.content})
                 messages.append({"role": "user", "content": (
-                    "Stop — you described what you'd do but took NO action. Do it NOW: "
-                    "call web_search (and any other tool you need), then write the FULL "
-                    "findings as your final message. Do not narrate intent again.")})
+                    "You have NOT delivered the result — you only said what you'd do. "
+                    "Write the COMPLETE answer/findings right now as your final message, "
+                    "in full, using what you already found. Do not describe your plan, "
+                    "do not say 'let me' — just output the finished content.")})
                 continue
             break
         messages.append({"role": "assistant", "content": resp.content})
@@ -305,7 +314,8 @@ async def _execute_opus(item: dict[str, Any], context: str) -> str:
             results.append({"type": "tool_result", "tool_use_id": tu.id,
                             "content": content, "is_error": is_err})
         messages.append({"role": "user", "content": results})
-    return outcome if (used_tool or not _looks_like_intent(outcome)) else ""
+    # If it never delivered (still a bare promise), return empty → honest failure.
+    return "" if _needs_action(outcome) else outcome
 
 
 def _openai_tools() -> list[dict[str, Any]]:

@@ -15,7 +15,19 @@ class IntentDetectionTest(unittest.TestCase):
             "First, I will find the founding year.",
             "",  # empty is definitely "no real result"
         ]:
-            self.assertTrue(executor._looks_like_intent(t), t)
+            self.assertTrue(executor._needs_action(t), t)
+
+    def test_promise_ending_after_search_flagged(self):
+        # the real failure: model searched, narrated, ended on a promise to compile
+        for t in [
+            "I'll research the UVA center to find details.\nNow let me search for more "
+            "specific information about services and hours.\nPerfect! I now have "
+            "comprehensive information. Let me compile this into a thorough summary and "
+            "save it to the vault.",
+            "I found several sources. Now I'll write up the full summary for you.",
+            "Great, I have what I need — let me put together the final answer.",
+        ]:
+            self.assertTrue(executor._needs_action(t), t)
 
     def test_real_output_not_flagged(self):
         for t in [
@@ -25,7 +37,7 @@ class IntentDetectionTest(unittest.TestCase):
             "access. Hours are 8am-5pm weekdays with urgent care on weekends.",
             "1819. The University of Virginia was founded by Thomas Jefferson in 1819.",
         ]:
-            self.assertFalse(executor._looks_like_intent(t), t)
+            self.assertFalse(executor._needs_action(t), t)
 
 
 class AutosaveTest(unittest.TestCase):
