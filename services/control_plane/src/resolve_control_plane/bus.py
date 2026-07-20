@@ -32,6 +32,7 @@ NOTIFY_TYPES = {
     "task.completed": "✅ Executor",
     "task.failed": "⚠️ Executor",
     "system.emergency_stop": "🛑 RESOLVE",
+    "finance.budget": "💸 RESOLVE",  # budget thresholds: max 3 pings/month by design
     # worker liveness deliberately NOT here — Trav said no Telegram pings about
     # the worker; the vitals pill + dashboard event log carry it instead.
 }

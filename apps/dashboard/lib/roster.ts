@@ -60,6 +60,7 @@ export const CONNECTORS: { id: ConnectorId; label: string }[] = [
   { id: "notion", label: "Notion" },
   { id: "google", label: "Google" },
   { id: "finance", label: "Finance" },
+  { id: "health", label: "Health" },
   { id: "local", label: "Laptop" },
   { id: "web", label: "Web" },
 ];

@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import __version__, artifacts, bus, costs, executor, local, routines, store
+from . import __version__, artifacts, bus, costs, executor, health, local, routines, store
 from .connectors import local_llm, simplefin
 from .assistant import (
     CONNECTOR_AVAILABLE, decide_approval, pending_actions, queue_status, run_command,
@@ -25,6 +25,7 @@ async def _start_worker() -> None:
     try:
         await anyio.to_thread.run_sync(costs.load_seed)  # restore today's cost total
         await anyio.to_thread.run_sync(artifacts.load_seed)  # restore artifact dock
+        await anyio.to_thread.run_sync(health.load_seed)  # restore latest Watch reading
     except Exception:
         pass
     try:
@@ -86,7 +87,7 @@ def connectors() -> dict:
 
 def _connector_health() -> list[dict]:
     labels = {"vault": "Vault (GitHub)", "gmail": "Gmail", "calendar": "Calendar",
-              "notion": "Notion", "google": "Google Docs"}
+              "notion": "Notion", "google": "Google Docs", "health": "Health (Watch)"}
     out = []
     for cid, check in CONNECTOR_AVAILABLE.items():
         out.append({"id": cid, "label": labels.get(cid, cid),
@@ -188,6 +189,17 @@ async def command(body: CommandBody) -> dict:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
     goal_id = await run_command(text)
     return {"ok": True, "goalId": goal_id}
+
+
+@app.post("/v1/health", dependencies=[Depends(auth)])
+async def health_post(body: dict) -> dict:
+    """Apple Watch numbers from the iOS Shortcut (sleep/HR/steps/…)."""
+    return await health.ingest(body)
+
+
+@app.get("/v1/health", dependencies=[Depends(auth)])
+async def health_get() -> dict:
+    return {"latest": health.latest()}
 
 
 @app.get("/v1/goals/{goal_id}/reply", dependencies=[Depends(auth)])

@@ -143,6 +143,14 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         s = simplefin.summary(int(args.get("days", 30)))
         # trim the transaction list for the model — it just needs the shape
         return {**s, "transactions": s.get("transactions", [])[:15]}
+    if name == "get_health":
+        from . import health
+        latest = health.latest()
+        return latest or {"noData": True,
+                          "note": "No fresh Apple Watch data — skip health commentary."}
+    if name == "get_recent_activity":
+        from . import ingest
+        return {"activity": ingest.gather_recent(min(int(args.get("days", 7)), 14))[:20000]}
     if name == "run_on_laptop":
         from . import local
         return local.enqueue(str(args["task"]))
@@ -261,6 +269,7 @@ CONNECTOR_AVAILABLE = {
     "finance": simplefin.configured,
     "local": lambda: __import__("resolve_control_plane.local", fromlist=["online"]).online(),
     "google": composio.configured,
+    "health": lambda: __import__("resolve_control_plane.health", fromlist=["configured"]).configured(),
 }
 
 # pending approval id → the action to run on approve

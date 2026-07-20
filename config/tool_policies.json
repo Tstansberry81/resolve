@@ -141,6 +141,12 @@
     },
     "web.search": {
       "risk": "read"
+    },
+    "health.read": {
+      "risk": "read"
+    },
+    "activity.read": {
+      "risk": "read"
     }
   }
 }

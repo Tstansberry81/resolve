@@ -15,6 +15,7 @@ export type ConnectorId =
   | "gmail"
   | "calendar"
   | "notion"
+  | "health"
   | "github"
   | "canvas"
   | "web"

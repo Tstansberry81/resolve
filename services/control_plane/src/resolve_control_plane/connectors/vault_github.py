@@ -122,14 +122,26 @@ def search_files(query: str) -> dict:
     except Exception:
         pass
     by_content: list[str] = []
+    fragments: dict[str, list[str]] = {}
     try:
         sr = requests.get(
             "https://api.github.com/search/code",
-            headers=_headers(), params={"q": f"{q} repo:{VAULT_REPO}", "per_page": 20},
+            headers={**_headers(), "Accept": "application/vnd.github.text-match+json"},
+            params={"q": f"{q} repo:{VAULT_REPO}", "per_page": 20},
             timeout=20,
         )
         if sr.status_code == 200:
-            by_content = [it.get("path", "") for it in sr.json().get("items", []) if it.get("path")]
+            for it in sr.json().get("items", []):
+                path = it.get("path", "")
+                if not path:
+                    continue
+                by_content.append(path)
+                # text-match fragments show WHY a page matched, so the agent can
+                # pick the right page instead of vault_reading every candidate
+                frags = [tm.get("fragment", "").strip()[:220]
+                         for tm in (it.get("text_matches") or [])][:2]
+                if frags:
+                    fragments[path] = frags
     except Exception:
         pass
     seen: set[str] = set()
@@ -138,4 +150,5 @@ def search_files(query: str) -> dict:
         if p and p not in seen:
             seen.add(p)
             merged.append(p)
-    return {"matches": merged[:30], "byName": by_name[:15], "byContent": by_content[:15]}
+    return {"matches": merged[:30], "byName": by_name[:15], "byContent": by_content[:15],
+            "fragments": fragments}

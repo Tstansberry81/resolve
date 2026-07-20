@@ -110,6 +110,21 @@ def gather_materials(day_iso: str) -> str:
     return "\n".join(lines)
 
 
+def gather_recent(days: int = 7) -> str:
+    """The last N days of ledger activity, day-labelled — feeds the weekly review."""
+    today = datetime.datetime.now(ZoneInfo("America/New_York")).date()
+    parts: list[str] = []
+    for i in range(min(int(days), 14), 0, -1):
+        d = (today - datetime.timedelta(days=i)).isoformat()
+        try:
+            mat = gather_materials(d)
+        except Exception:
+            continue
+        if mat.strip():
+            parts.append(f"=== {d} ===\n{mat}")
+    return "\n\n".join(parts) or "(no recorded activity in that window)"
+
+
 async def run_daily_ingest(day_iso: str | None = None) -> dict:
     """Run the autonomous CLAUDE.md ingest for `day_iso` (defaults to yesterday ET)."""
     if not vault_github.configured():

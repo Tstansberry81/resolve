@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from . import bus
+import anyio
+
+from . import bus, store
 
 log = logging.getLogger("resolve.routines")
 
@@ -79,6 +83,18 @@ async def _capture_brief(goal_id: str, day: str) -> None:
                 return
 
 
+def _brief_prompt() -> str:
+    """BRIEF_PROMPT plus the optional add-ons that depend on configured systems."""
+    p = BRIEF_PROMPT
+    p += (" Also call get_health — if there's fresh Apple Watch data, add ONE recovery"
+          " line (sleep, resting heart rate); if there's none, skip it silently.")
+    budget = float(os.getenv("MONTHLY_BUDGET", "0") or 0)
+    if budget > 0:
+        p += (f" Monthly budget is ${budget:.0f}: call get_finance and add one line on"
+              " month-to-date spending vs the budget.")
+    return p
+
+
 async def run_morning_brief() -> str:
     from .assistant import run_command
 
@@ -86,9 +102,138 @@ async def run_morning_brief() -> str:
     _last_brief_date = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     await bus.emit("core", "routine.morning_brief",
                    "Morning brief routine kicked off", level="info")
-    goal_id = await run_command(BRIEF_PROMPT)
+    goal_id = await run_command(_brief_prompt())
     asyncio.get_running_loop().create_task(_capture_brief(goal_id, _last_brief_date))
     return goal_id
+
+
+# ── spending guardrail (MONTHLY_BUDGET env; one alert per threshold per month) ──
+_budget_fired: dict[str, set[int]] = {}  # "2026-07" -> {50, 80, 100}
+_last_budget_date: str | None = None
+
+
+def _spend_mtd(transactions: list[dict], first_iso: str) -> float:
+    return round(-sum(t.get("amount", 0) for t in transactions
+                      if t.get("amount", 0) < 0 and (t.get("date") or "") >= first_iso), 2)
+
+
+def _budget_level(pct: float) -> int | None:
+    for level in (100, 80, 50):
+        if pct >= level:
+            return level
+    return None
+
+
+async def check_budget() -> None:
+    """Daily: month-to-date spend vs MONTHLY_BUDGET; ping once per 50/80/100%
+    threshold per month. Sent levels are marked durably in agent_events so a
+    deploy can't re-fire them."""
+    budget = float(os.getenv("MONTHLY_BUDGET", "0") or 0)
+    if budget <= 0:
+        return
+    from .connectors import simplefin
+    if not simplefin.configured():
+        return
+    now = datetime.now(ZoneInfo("America/New_York"))
+    month, first = now.strftime("%Y-%m"), now.strftime("%Y-%m-01")
+    fired = _budget_fired.setdefault(month, set())
+    if not fired:  # fresh process — reload the month's sent markers
+        try:
+            rows = await anyio.to_thread.run_sync(lambda: store.select(
+                "agent_events", {"event_type": "eq.finance.budget_mark",
+                                 "created_at": f"gte.{first}T00:00:00", "limit": "10"}))
+            for r in rows or []:
+                lv = (r.get("payload") or {}).get("threshold")
+                if lv:
+                    fired.add(int(lv))
+        except Exception:
+            pass
+    s = await anyio.to_thread.run_sync(lambda: simplefin.summary(35))
+    spend = _spend_mtd(s.get("transactions", []), first)
+    level = _budget_level(spend / budget * 100)
+    if level is None or level in fired:
+        return
+    fired.add(level)
+    try:
+        await anyio.to_thread.run_sync(lambda: store.insert(
+            "agent_events", {"event_type": "finance.budget_mark", "actor": "core",
+                             "payload": {"threshold": level, "spend": spend}}))
+    except Exception:
+        pass
+    await bus.emit(
+        "core", "finance.budget",
+        f"Spending at {int(spend / budget * 100)}% of the ${budget:.0f} budget",
+        detail=(f"${spend:.2f} spent so far in {month} — {int(spend / budget * 100)}% of"
+                f" the ${budget:.0f} monthly budget."),
+        level="warn" if level >= 80 else "info",
+    )
+
+
+# ── travel watch (flights on today's calendar → travel briefing) ─────────────
+_last_travel_date: str | None = None
+_TRAVEL_RE = re.compile(r"\b(flight|fly|flying|airport|depart(?:ure)?|boarding|airline)\b|✈",
+                        re.IGNORECASE)
+
+
+def _travel_events(events: list[dict], today_iso: str) -> list[dict]:
+    return [e for e in events
+            if str(e.get("start") or "").startswith(today_iso)
+            and _TRAVEL_RE.search(e.get("title") or "")]
+
+
+async def run_travel_watch() -> str | None:
+    """6am on travel days: research the flight's status + when to leave, through
+    the normal assistant loop (web research routes to the planner)."""
+    from .assistant import run_command
+    from .connectors import gcal
+
+    global _last_travel_date
+    _last_travel_date = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    if not gcal.configured():
+        return None
+    try:
+        events = await anyio.to_thread.run_sync(lambda: gcal.list_events(1))
+    except Exception:
+        return None
+    todays = _travel_events(events, _last_travel_date)
+    if not todays:
+        return None
+    lines = "; ".join(
+        f"“{e.get('title')}” at {e.get('start')}"
+        + (f" ({e['location']})" if e.get("location") else "")
+        for e in todays)
+    await bus.emit("core", "routine.travel_watch",
+                   f"Travel day — checking {len(todays)} flight(s)", level="info")
+    return await run_command(
+        f"Travel day: Trav's calendar has {lines} today. Research the current status of"
+        " this flight/travel (delays, gate/terminal if findable), typical security-wait"
+        " advice, and when he should leave. Write a short travel briefing with concrete"
+        " times, then vault_log it titled 'Travel briefing' with today's date."
+    )
+
+
+# ── weekly review (Sunday evening synthesis of the week) ─────────────────────
+_last_review_date: str | None = None
+
+WEEKLY_PROMPT = (
+    "Weekly review. Call get_recent_activity with days 7 (the week's ledger: commands,"
+    " outcomes, decisions, failures), get_finance with days 7, and get_calendar with"
+    " days 7 (the week AHEAD). Synthesize an honest review: what got done, decisions"
+    " made, what failed or stalled (name it plainly), money in/out, and what's coming"
+    " next week. save_to_vault with title 'Weekly Review <today's date>' and category"
+    " 'reviews' with the full write-up, then reply with a tight 6-8 sentence spoken-style"
+    " summary."
+)
+
+
+async def run_weekly_review() -> str:
+    from .assistant import run_command
+
+    global _last_review_date
+    _last_review_date = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    await bus.emit("core", "routine.weekly_review",
+                   "Sunday weekly review kicked off", level="info")
+    return await run_command(WEEKLY_PROMPT)
 
 
 async def scheduler_loop() -> None:
@@ -103,6 +248,10 @@ async def scheduler_loop() -> None:
                 _last_ingest_date = today
                 from . import ingest
                 await ingest.run_daily_ingest()
+            # 6:00 on travel days: flight status + when to leave
+            if (now.hour == 6 and now.minute < 10
+                    and _last_travel_date != today):
+                await run_travel_watch()
             if (now.hour == 7 and now.minute < 10
                     and _last_brief_date != today):
                 await run_morning_brief()
@@ -110,6 +259,16 @@ async def scheduler_loop() -> None:
             if (now.hour == 7 and 30 <= now.minute < 40
                     and _last_mailscan_date != today):
                 await run_mail_scan()
+            # 18:00 Sunday: weekly review
+            if (now.weekday() == 6 and now.hour == 18 and now.minute < 10
+                    and _last_review_date != today):
+                await run_weekly_review()
+            # 20:30: spending guardrail check (quiet unless a threshold is crossed)
+            global _last_budget_date
+            if (now.hour == 20 and 30 <= now.minute < 40
+                    and _last_budget_date != today):
+                _last_budget_date = today
+                await check_budget()
         except Exception:
             log.exception("routine tick failed")
         try:
