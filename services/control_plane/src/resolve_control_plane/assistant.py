@@ -842,6 +842,12 @@ async def _loop(goal_id: str, text: str) -> None:
             pass
         if pending_actions:
             await bus.set_orb("waiting", "Sonnet is waiting on your approval", ["assistant"])
+        elif executor.is_working():
+            # The assistant handed off to a background plan and replied "queued" —
+            # don't stomp the orb to idle. Keep it executing with the executor lit
+            # so the constellation shows real work; the executor loop settles it
+            # to idle when the queue drains.
+            await bus.set_orb("executing", "Executor is working your plan", ["executor"])
         else:
             await bus.set_orb("idle", "Sonnet standing by", [])
     except asyncio.CancelledError:
