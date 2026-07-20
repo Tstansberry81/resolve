@@ -315,7 +315,7 @@ async function runTool(taskId, name, args) {
       model: MODEL, max_tokens: 1000,
       messages: [{ role: "user", content: [
         { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
-        { type: "text", text: `This is a screenshot of Trav's Mac screen right now. ${q}` },
+        { type: "text", text: `This is a screenshot of Trav's Mac screen right now. ${q}\n\nIMPORTANT: if the image shows ONLY a desktop wallpaper with no windows, menu bar content, or UI, the capture almost certainly lacks Screen Recording permission — say exactly that and tell him to allow the worker's node process in System Settings → Privacy & Security → Screen Recording, instead of describing the wallpaper.` },
       ] }],
     });
     const answer = resp.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
@@ -468,7 +468,12 @@ async function main() {
       if (pollFails) console.log(`poll recovered after ${pollFails} failure(s)`);
       pollFails = 0;
       if (job && job.taskId) {
-        if (job.action) {
+        if (job.action && job.action.kind === "restart") {
+          // cloud-pushed restart: confirm, then exit — launchd relaunches with fresh code
+          console.log(`> restart requested by the control plane (${job.taskId})`);
+          await cp("/v1/local/result", { method: "POST", body: JSON.stringify({ taskId: job.taskId, summary: "Worker restarting — back in a few seconds." }) }).catch(() => {});
+          process.exit(0);
+        } else if (job.action) {
           console.log(`> open ${job.taskId}: ${job.action.kind} ${String(job.action.value).slice(0, 80)}`);
           await runOpen(job.taskId, job.action).catch((e) => console.error("open failed", e));
         } else {

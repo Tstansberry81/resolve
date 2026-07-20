@@ -29,6 +29,7 @@ TOOL_POLICY = {
     "open_file": ("laptop.display", "local"),
     "open_app": ("laptop.display", "local"),
     "open_website": ("laptop.display", "local"),
+    "restart_worker": ("laptop.display", "local"),
     "create_google_doc": ("gdrive.create", "google"),
     "create_google_sheet": ("gdrive.create", "google"),
     "create_google_slides": ("gdrive.create", "google"),
@@ -92,10 +93,13 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "get_inbox_recent",
-        "description": "List the latest inbox emails (newest first) with sender, subject, unread flag, a text snippet, and a stable uid per message. THE read for an inbox triage: review these, then propose archive_emails(uids) for the junk and draft replies for what matters.",
+        "description": "List the latest inbox emails (newest first) with sender, subject, unread flag, a text snippet, and a stable uid per message. THE read for an inbox triage or an inbox→calendar sweep: review these, then propose archive_emails(uids) for the junk, draft replies for what matters, or create_calendar_event for real events found in mail.",
         "input_schema": {
             "type": "object",
-            "properties": {"limit": {"type": "integer", "description": "How many recent messages (default 25, max 50)"}},
+            "properties": {
+                "limit": {"type": "integer", "description": "How many recent messages (default 25, max 50)"},
+                "days": {"type": "integer", "description": "Only messages from the last N days (IMAP SINCE) — use 2 for daily sweeps"},
+            },
             "additionalProperties": False,
         },
     },
@@ -240,6 +244,11 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["url"],
             "additionalProperties": False,
         },
+    },
+    {
+        "name": "restart_worker",
+        "description": "Restart the laptop worker process (it reloads fresh code and reconnects; launchd brings it right back). Use when Trav says the worker is stuck/stale or asks to restart it.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "name": "get_finance",

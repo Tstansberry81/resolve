@@ -112,7 +112,10 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
     if name == "get_unread_email":
         return gmail_imap.unread_summary()
     if name == "get_inbox_recent":
-        return gmail_imap.inbox_recent(min(int(args.get("limit", 25)), 50))
+        return gmail_imap.inbox_recent(
+            max(1, min(int(args.get("limit", 25)), 50)),  # 0/neg would slice the WHOLE inbox
+            days=int(args["days"]) if args.get("days") else None,
+        )
     if name == "archive_emails":
         return gmail_imap.archive_messages([str(u) for u in args.get("uids", [])])
     if name == "send_email":
@@ -163,6 +166,9 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
         from . import local, sites
         u = sites.resolve(str(args["url"]))  # map Trav's shortcuts to exact URLs
         return local.enqueue_action("url", u, f"Opening {u}")
+    if name == "restart_worker":
+        from . import local
+        return local.enqueue_action("restart", "", "Restarting the laptop worker")
     if name == "create_google_doc":
         res = composio.create_doc(str(args["title"]), str(args.get("content", "")),
                                   folder=args.get("folder") or None)
@@ -259,6 +265,42 @@ CONNECTOR_AVAILABLE = {
 
 # pending approval id → the action to run on approve
 pending_actions: dict[str, dict[str, Any]] = {}
+
+
+async def rehydrate_pending() -> int:
+    """Reload still-pending approvals from Supabase into memory at boot.
+    Approvals used to live only in this dict and died with the process on every
+    deploy — leaving zombie goals that could never be decided (the root cause
+    behind the mission ✕ button). Now a restart is transparent: the banner
+    still works and deciding still executes."""
+    try:
+        rows = await anyio.to_thread.run_sync(
+            lambda: store.select("approvals", {"status": "eq.pending",
+                                               "order": "created_at.desc", "limit": "20"}))
+    except Exception:
+        return 0
+    n = 0
+    for r in rows or []:
+        rid = str(r.get("id") or "")
+        req = r.get("request_json") or {}
+        if isinstance(req, str):
+            try:
+                req = json.loads(req)
+            except Exception:
+                req = {}
+        tool = req.get("tool")
+        if not rid or rid in pending_actions or tool not in TOOL_POLICY:
+            continue
+        pending_actions[rid] = {
+            "tool": tool,
+            "args": req.get("args") or {},
+            "goal_id": str(r.get("goal_id") or rid),
+            "summary": r.get("action_summary") or f"{tool} — needs your approval",
+            "preview": r.get("preview_json") or [],
+            "risk": r.get("risk_class") or "unknown",
+        }
+        n += 1
+    return n
 
 # recent (user_text, assistant_reply) exchanges — gives follow-up commands
 # conversational context; process-local, resets on deploy

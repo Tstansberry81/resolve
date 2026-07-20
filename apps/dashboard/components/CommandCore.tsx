@@ -29,7 +29,9 @@ const STATE_LABEL: Record<string, string> = {
 const EMPTY_VOICE = { wakeOn: false, active: false, speaking: false };
 
 // Markdown → something worth hearing: strip formatting, cap at a sentence
-// boundary so a long brief doesn't monologue for minutes.
+// boundary so a long brief doesn't monologue for minutes. Cap must leave room
+// for the "Good morning." prefix + tail under speak()'s 600-char slice, or the
+// narration gets cut mid-sentence.
 function spokenBrief(md: string): string {
   const plain = md
     .replace(/```[\s\S]*?```/g, " ")
@@ -38,10 +40,10 @@ function spokenBrief(md: string): string {
     .replace(/^\s*[-•]\s*/gm, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (plain.length <= 700) return plain;
-  const cut = plain.slice(0, 700);
+  if (plain.length <= 480) return plain;
+  const cut = plain.slice(0, 480);
   const end = cut.lastIndexOf(". ");
-  return `${cut.slice(0, end > 400 ? end + 1 : 700)} That's the highlights — the full brief is on your dashboard.`;
+  return `${cut.slice(0, end > 280 ? end + 1 : 480)} That's the highlights — the full brief is on your dashboard.`;
 }
 
 export function CommandCore() {

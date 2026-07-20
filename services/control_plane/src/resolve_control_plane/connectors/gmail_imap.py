@@ -3,9 +3,11 @@ GMAIL_APP_PASSWORD exactly like the vault1 bot."""
 
 from __future__ import annotations
 
+import datetime
 import email
 import imaplib
 import os
+import re
 import smtplib
 from email.header import decode_header
 from email.mime.text import MIMEText
@@ -46,22 +48,38 @@ def unread_summary(limit: int = 5) -> dict:
             pass
 
 
-def inbox_recent(limit: int = 25) -> dict:
+def inbox_recent(limit: int = 25, days: int | None = None) -> dict:
     """Latest INBOX messages (newest first) with STABLE IMAP UIDs, unread flag
-    and a short plain-text snippet — the raw material for a triage pass. The
-    uid values feed archive_messages directly."""
+    and a plain-text snippet — the raw material for triage and the daily
+    inbox→calendar sweep. `days` narrows to messages since N days ago (IMAP
+    SINCE). One batched FETCH for all messages, not a round-trip each."""
+    lim = max(1, int(limit))  # 0/negative would slice the whole mailbox
     m = imaplib.IMAP4_SSL("imap.gmail.com", 993)
     try:
         m.login(os.environ["GMAIL_ADDRESS"], os.environ["GMAIL_APP_PASSWORD"])
         m.select("INBOX", readonly=True)
-        _, data = m.uid("search", None, "ALL")
-        uids = (data[0] or b"").split()[-int(limit):]
+        if days:
+            since = (datetime.date.today() - datetime.timedelta(days=int(days))).strftime("%d-%b-%Y")
+            _, data = m.uid("search", None, "SINCE", since)
+        else:
+            _, data = m.uid("search", None, "ALL")
+        uids = (data[0] or b"").split()[-lim:]
         out = []
+        by_uid: dict[bytes, tuple[bytes, bytes]] = {}
+        if uids:
+            _, md = m.uid("fetch", b",".join(uids), "(FLAGS BODY.PEEK[]<0.4096>)")
+            for p in md or []:
+                if not isinstance(p, tuple) or len(p) < 2:
+                    continue
+                head = p[0] or b""
+                mu = re.search(rb"UID (\d+)", head)
+                if mu:
+                    by_uid[mu.group(1)] = (head, p[1] or b"")
         for u in reversed(uids):  # newest first
+            head, raw = by_uid.get(u, (b"", b""))
+            if not raw:
+                continue
             try:
-                _, md = m.uid("fetch", u, "(FLAGS BODY.PEEK[]<0.2048>)")
-                raw = b"".join(p[1] for p in md if isinstance(p, tuple))
-                flags = b" ".join(p[0] for p in md if isinstance(p, tuple))
                 msg = email.message_from_bytes(raw)
                 snippet = ""
                 try:
@@ -72,7 +90,7 @@ def inbox_recent(limit: int = 25) -> dict:
                                 part = cand
                                 break
                     payload = part.get_payload(decode=True) or b""
-                    snippet = payload.decode("utf-8", "replace")[:200].strip()
+                    snippet = payload.decode("utf-8", "replace")[:300].strip()
                 except Exception:
                     pass  # truncated MIME decodes best-effort; headers still land
                 out.append({
@@ -80,7 +98,7 @@ def inbox_recent(limit: int = 25) -> dict:
                     "from": _decode(msg.get("From", "")),
                     "subject": _decode(msg.get("Subject", "")),
                     "date": msg.get("Date", ""),
-                    "unread": b"\\Seen" not in flags,
+                    "unread": b"\\Seen" not in head,
                     "snippet": snippet,
                 })
             except Exception:

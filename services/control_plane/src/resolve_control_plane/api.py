@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 
 import anyio
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -24,6 +25,14 @@ async def _start_worker() -> None:
     try:
         await anyio.to_thread.run_sync(costs.load_seed)  # restore today's cost total
         await anyio.to_thread.run_sync(artifacts.load_seed)  # restore artifact dock
+    except Exception:
+        pass
+    try:
+        from .assistant import rehydrate_pending
+        n = await rehydrate_pending()  # deploys no longer orphan pending approvals
+        if n:
+            await bus.emit("core", "system.rehydrated",
+                           f"Restored {n} pending approval(s) across the restart")
     except Exception:
         pass
     asyncio.get_running_loop().create_task(executor.worker_loop())
@@ -179,6 +188,20 @@ async def command(body: CommandBody) -> dict:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
     goal_id = await run_command(text)
     return {"ok": True, "goalId": goal_id}
+
+
+@app.get("/v1/goals/{goal_id}/reply", dependencies=[Depends(auth)])
+async def goal_reply(goal_id: str, timeout: int = 50) -> dict:
+    """Long-poll for a goal's assistant.reply. One request replaces N full
+    snapshot polls for bridge callers (the Telegram /resolve bridge)."""
+    deadline = time.monotonic() + max(1, min(int(timeout), 55))
+    while True:
+        for ev in reversed(bus.recent_events()):
+            if ev.get("type") == "assistant.reply" and ev.get("goalId") == goal_id:
+                return {"done": True, "reply": ev.get("detail") or ev.get("summary")}
+        if time.monotonic() > deadline:
+            return {"done": False}
+        await asyncio.sleep(1.0)
 
 
 @app.post("/v1/goals/{goal_id}/dismiss", dependencies=[Depends(auth)])
