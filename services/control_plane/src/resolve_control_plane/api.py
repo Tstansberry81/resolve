@@ -231,18 +231,26 @@ async def audit_log(hours: int = 24, limit: int = 60, sensitive: bool = False) -
         lambda: audit.recent(hours=hours, limit=limit, sensitive_only=sensitive))
 
 
-@app.get("/v1/goals/{goal_id}/reply", dependencies=[Depends(auth)])
-async def goal_reply(goal_id: str, timeout: int = 50) -> dict:
-    """Long-poll for a goal's assistant.reply. One request replaces N full
-    snapshot polls for bridge callers (the Telegram /resolve bridge)."""
+async def _await_reply(goal_id: str, timeout: int) -> str | None:
+    """Wait for a goal's assistant.reply to hit the bus. Returns None on timeout.
+    Shared by the long-poll endpoint and the in-process Telegram bridge."""
     deadline = time.monotonic() + max(1, min(int(timeout), 55))
     while True:
         for ev in reversed(bus.recent_events()):
             if ev.get("type") == "assistant.reply" and ev.get("goalId") == goal_id:
-                return {"done": True, "reply": ev.get("detail") or ev.get("summary")}
+                return ev.get("detail") or ev.get("summary") or ""
         if time.monotonic() > deadline:
-            return {"done": False}
+            return None
         await asyncio.sleep(1.0)
+
+
+@app.get("/v1/goals/{goal_id}/reply", dependencies=[Depends(auth)])
+async def goal_reply(goal_id: str, timeout: int = 50) -> dict:
+    """Long-poll for a goal's assistant.reply. One request replaces N full
+    snapshot polls. Kept for external callers (iOS Shortcuts); the Telegram
+    bridge no longer needs it now that the webhook runs in-process."""
+    reply = await _await_reply(goal_id, timeout)
+    return {"done": False} if reply is None else {"done": True, "reply": reply}
 
 
 @app.post("/v1/goals/{goal_id}/dismiss", dependencies=[Depends(auth)])
@@ -269,6 +277,110 @@ async def approval_decide(approval_id: str, body: DecisionBody) -> dict:
     if body.decision not in ("approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision must be approved|rejected")
     return await decide_approval(approval_id, body.decision)
+
+
+# ── Telegram bridge ───────────────────────────────────────────────────────
+# The inbound half of Telegram — button taps and /resolve — used to live in the
+# legacy vault1 monolith, which is the only reason that service had to stay
+# deployed. It runs here now. Telegram can't send a bearer token, so this one
+# route is gated by the setWebhook `secret_token` header instead of auth(), plus
+# a hard chat-id allowlist: the bot token is discoverable, so the header alone
+# is authentication, not authorization.
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+_CB_PREFIX = "rslv:"
+_DECISIONS = {"ok": "approved", "no": "rejected"}
+
+
+def _telegram_gate(request: Request) -> None:
+    if not TELEGRAM_WEBHOOK_SECRET:
+        # fail CLOSED, same policy as CP_TOKEN — an unset secret would leave an
+        # unauthenticated command endpoint open to anyone who guesses the path
+        raise HTTPException(status_code=503,
+                            detail="telegram webhook not configured "
+                                   "(set TELEGRAM_WEBHOOK_SECRET)")
+    got = request.headers.get("x-telegram-bot-api-secret-token", "") or ""
+    if not hmac.compare_digest(got, TELEGRAM_WEBHOOK_SECRET):
+        raise HTTPException(status_code=401, detail="bad webhook secret")
+
+
+async def _run_and_reply(chat_id: object, text: str) -> None:
+    """Execute a /resolve command and push the answer back to the chat. Runs
+    detached: Telegram times the webhook out in seconds and retries on a slow
+    response, which would double-run the command."""
+    from .connectors import telegram_notify
+
+    try:
+        goal_id = await run_command(text)
+        reply = await _await_reply(goal_id, 50)
+        out = reply or "Working on it — check the dashboard for the result."
+    except Exception as exc:
+        out = f"That failed: {str(exc)[:200]}"
+    try:
+        await anyio.to_thread.run_sync(lambda: telegram_notify.reply_to(chat_id, out))
+    except Exception:
+        pass
+
+
+@app.post("/v1/telegram/webhook", dependencies=[Depends(_telegram_gate)])
+async def telegram_webhook(update: dict) -> dict:
+    """Handle one Telegram update: an approval button tap, or `/resolve <text>`.
+
+    Always answers 200 for updates it declines to act on — a non-2xx makes
+    Telegram redeliver the same update indefinitely.
+    """
+    from .connectors import telegram_notify
+
+    cb = update.get("callback_query") or {}
+    if cb:
+        message = cb.get("message") or {}
+        chat_id = (message.get("chat") or {}).get("id")
+        if not telegram_notify.chat_allowed(chat_id):
+            return {"ok": True, "ignored": "chat not allowed"}
+        data = str(cb.get("data") or "")
+        if not data.startswith(_CB_PREFIX):
+            return {"ok": True, "ignored": "unknown callback"}
+        _, _, rest = data.partition(_CB_PREFIX)
+        verb, _, approval_id = rest.partition(":")
+        decision = _DECISIONS.get(verb)
+        if not decision or not approval_id:
+            return {"ok": True, "ignored": "unknown callback"}
+        result = await decide_approval(approval_id, decision)
+        if result.get("ok"):
+            note = "Approved ✅" if decision == "approved" else "Rejected 🚫"
+        else:
+            note = result.get("error") or "Couldn't apply that decision"
+        try:
+            await anyio.to_thread.run_sync(
+                lambda: telegram_notify.answer_callback(str(cb.get("id") or ""), note))
+            # strip the keyboard so a stale card can't be tapped a second time
+            if message.get("message_id") is not None:
+                await anyio.to_thread.run_sync(
+                    lambda: telegram_notify.edit_message_text(
+                        chat_id, message["message_id"],
+                        f"{message.get('text') or 'Approval'}\n\n— {note}"))
+        except Exception:
+            pass  # the decision already landed; the UI echo is best-effort
+        return {"ok": True, "decision": decision, **result}
+
+    msg = update.get("message") or {}
+    chat_id = (msg.get("chat") or {}).get("id")
+    text = str(msg.get("text") or "").strip()
+    if not text:
+        return {"ok": True, "ignored": "no text"}
+    if not telegram_notify.chat_allowed(chat_id):
+        return {"ok": True, "ignored": "chat not allowed"}
+    for cmd in ("/resolve", "/ask"):
+        if text == cmd or text.startswith(cmd + " "):
+            body = text[len(cmd):].strip()
+            break
+    else:
+        return {"ok": True, "ignored": "not a command"}
+    if not body:
+        return {"ok": True, "ignored": "empty command"}
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return {"ok": False, "error": "ANTHROPIC_API_KEY not configured"}
+    asyncio.get_running_loop().create_task(_run_and_reply(chat_id, body))
+    return {"ok": True, "queued": True}
 
 
 @app.post("/v1/stop", dependencies=[Depends(auth)])

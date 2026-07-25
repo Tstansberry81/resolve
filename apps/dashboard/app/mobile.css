@@ -40,9 +40,9 @@
     flex-wrap: wrap;
   }
 
-  /* trim noise on a small screen (keep the LIVE/MOCK badge) */
+  /* trim noise on a small screen (keep the LIVE/OFFLINE badge) */
   .header-right .clock,
-  .header-right .badge:not(.badge-live):not(.badge-mock) {
+  .header-right .badge:not(.badge-live):not(.badge-offline) {
     display: none;
   }
 

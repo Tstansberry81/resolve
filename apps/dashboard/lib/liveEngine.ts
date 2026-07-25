@@ -1,8 +1,9 @@
 "use client";
 
-// Live engine: same store contract as the mock, fed by the control plane
-// through the /api/cp proxy (snapshot + SSE). Components can't tell the
-// difference — that was the whole design bet.
+// The engine: control-plane state over the /api/cp proxy (snapshot + SSE),
+// exposed as an immutable EngineState via subscribe/getSnapshot. When the
+// backend can't be reached the state goes `mode: "offline"` and stays empty —
+// the scripted mock this replaced is deleted, not disabled.
 
 import { AGENTS } from "./roster";
 import type {
@@ -58,23 +59,27 @@ function vitalsFrom(
   };
 }
 
+/** What the UI shows before the first snapshot lands, and whenever the control
+ *  plane is unreachable. Empty and labelled OFFLINE — never invented data. */
+export const OFFLINE_STATE: EngineState = {
+  mode: "offline",
+  orb: "idle",
+  orbCaption: "Control plane unreachable",
+  goals: [],
+  events: [],
+  approvals: [],
+  artifacts: [],
+  vitals: vitalsFrom([], "idle", 0),
+  activeNodes: [],
+  activeEdge: null,
+  emergencyStopped: false,
+  localExec: false,
+  localAvailable: false,
+  morningBrief: null,
+};
+
 export class LiveEngine {
-  private state: EngineState = {
-    mode: "live",
-    orb: "idle",
-    orbCaption: "Sonnet standing by",
-    goals: [],
-    events: [],
-    approvals: [],
-    artifacts: [],
-    vitals: vitalsFrom([], "idle", 0),
-    activeNodes: [],
-    activeEdge: null,
-    emergencyStopped: false,
-    localExec: false,
-    localAvailable: false,
-    morningBrief: null,
-  };
+  private state: EngineState = OFFLINE_STATE;
 
   private listeners = new Set<() => void>();
   private es: EventSource | null = null;
@@ -106,9 +111,13 @@ export class LiveEngine {
   private async loadSnapshot() {
     try {
       const r = await fetch("/api/cp/v1/snapshot", { cache: "no-store" });
-      if (!r.ok) return;
+      if (!r.ok) {
+        this.commit({ mode: "offline", orbCaption: "Control plane unreachable" });
+        return;
+      }
       const s = await r.json();
       this.commit({
+        mode: "live",
         orb: s.orb,
         orbCaption: s.orbCaption,
         activeNodes: s.activeNodes ?? [],
@@ -123,7 +132,9 @@ export class LiveEngine {
         morningBrief: s.morningBrief ?? null,
       });
     } catch {
-      // snapshot refresh is best-effort; SSE keeps flowing
+      // unreachable: say so in the header rather than leaving the last-known
+      // state looking current. Existing rows stay; the 30s poll reconciles.
+      this.commit({ mode: "offline", orbCaption: "Control plane unreachable" });
     }
   }
 
@@ -171,8 +182,11 @@ export class LiveEngine {
         this.commit({ artifacts: [art, ...rest].slice(0, 40) });
       }
     };
+    this.es.onopen = () => this.commit({ mode: "live" });
     this.es.onerror = () => {
-      // EventSource auto-reconnects; nothing to do
+      // EventSource auto-reconnects on its own; flag the gap so the header
+      // reads OFFLINE while the stream is down instead of a stale LIVE
+      this.commit({ mode: "offline" });
     };
   }
 

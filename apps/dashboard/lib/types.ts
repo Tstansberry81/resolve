@@ -1,5 +1,5 @@
-// Mirrors the control-plane domain (services/control_plane) so the real SSE
-// feed can replace the mock engine without touching components.
+// Mirrors the control-plane domain (services/control_plane); the SSE feed in
+// lib/liveEngine.ts is the only producer of this state.
 // Agent roster per docs/DIRECTION.md: the assistant fronts everything.
 
 export type AgentId =
@@ -125,7 +125,8 @@ export interface Vitals {
 }
 
 export interface EngineState {
-  mode: "mock" | "live";
+  /** "offline" = the control plane isn't answering. There is no mock mode. */
+  mode: "live" | "offline";
   orb: OrbState;
   orbCaption: string;
   goals: Goal[];

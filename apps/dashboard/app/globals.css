@@ -135,7 +135,7 @@ body::before {
   border: 1px solid var(--edge);
 }
 
-.badge-mock {
+.badge-offline {
   color: var(--amber);
   border-color: rgba(255, 176, 31, 0.35);
   background: var(--amber-dim);

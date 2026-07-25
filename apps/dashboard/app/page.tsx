@@ -39,7 +39,7 @@ export default function CommandCenter() {
             {state.mode === "live" ? (
             <span className="badge badge-live">LIVE</span>
           ) : (
-            <span className="badge badge-mock">MOCK DATA</span>
+            <span className="badge badge-offline">OFFLINE</span>
           )}
           </div>
           <div className="header-right">
