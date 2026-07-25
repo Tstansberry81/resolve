@@ -1,9 +1,9 @@
-"""Worker phase: the Planner (Opus 4.8) plans, the Opus executor works the queue.
+"""Worker phase: the Planner plans, the executor works the queue.
 
 Sonnet hands complex goals off via her plan_project tool. The Planner
-(claude-opus-4-8, on Anthropic) writes a short step list; steps persist to the
+(PLANNER_MODEL, on Anthropic) writes a short step list; steps persist to the
 tasks table and an in-process executor coroutine works them one at a time with
-claude-opus-4-8 under the same policy engine as the assistant. The executor can
+EXECUTOR_MODEL under the same policy engine as the assistant. The executor can
 also research the web (Anthropic server-side web search) mid-step. The /v1/stop
 flag halts the worker between steps — that is the emergency stop's backend teeth.
 """
@@ -144,6 +144,16 @@ PLAN_TOOL = {
 }
 
 
+def _cloud_label() -> str:
+    """Friendly name for the current cloud executor model, so the UI reports the
+    model that ACTUALLY ran (this was hardcoded 'Opus' while the default is Haiku)."""
+    m = EXECUTOR_MODEL.lower()
+    for key in ("opus", "sonnet", "haiku"):
+        if key in m:
+            return key.capitalize()
+    return EXECUTOR_MODEL
+
+
 def available() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY"))
 
@@ -151,7 +161,7 @@ def available() -> bool:
 async def set_local_exec(value: bool) -> None:
     global local_exec
     local_exec = bool(value)
-    where = "local Qwen" if local_exec else "Opus"
+    where = "local Qwen" if local_exec else _cloud_label()
     await bus.emit("core", "system.exec_backend", f"Executor now runs on {where}",
                    level="info")
 
@@ -260,14 +270,33 @@ async def _dispatch_tool(name: str, args: dict[str, Any], goal_id: str) -> tuple
         return f"Error: {exc}", True
 
 
+# Opening narration that PROMISES work instead of delivering it. The lead-in
+# must be a first-person promise ("I'll research…", "let me compile…"), NOT a
+# bare filler word: "Sure, the balance is $12", "Okay, your flight is at 6:40",
+# and "I can confirm the meeting is set" are real concise answers, not stalls —
+# a bare "sure"/"okay"/"i can" must never match, or we discard good output.
+_INTENT_LEAD = (
+    r"(?:i'?ll|i will|i'?m going to|i am going to|let me|"
+    r"first,?\s+i(?:'?ll| will)?|here'?s what i'?ll|"
+    r"i'?d be happy to|i'?m happy to|i can help|i'?m about to)"
+)
+_INTENT_VERB = (
+    r"(?:research|find|search|look|check|compile|summar\w*|write|draft|create|"
+    r"put together|gather|locate|prepare|organize|provide|give|pull|read|do|"
+    r"answer|get|start|dig|explore|review)"
+)
 _INTENT_RE = re.compile(
-    r"^\s*(i'?ll\b|i will\b|let me\b|i'?m going to\b|i am going to\b|i can\b|"
-    r"i'?d\b|first,? i|to (research|find|do|answer)|sure[,!. ]|okay[,!. ]|"
-    r"here'?s what i'?ll)", re.IGNORECASE)
+    r"^\s*(?:(?:sure|okay|ok|alright|great|perfect|got it)[,!.\s]+)?"
+    + _INTENT_LEAD + r"\s+" + _INTENT_VERB,
+    re.IGNORECASE)
 # A trailing PROMISE to still-do-the-work: the model searched, narrated, then
 # ended on "let me compile/write/summarize/save…" without producing the result.
+# The promise is always FIRST-PERSON ("let me", "I'll", "I'm going to") — a bare
+# "going to" also matched third-person prose like "the board is going to review
+# the hours", wrongly discarding a real writeup, so it's now subject-bound.
 _PROMISE_TAIL_RE = re.compile(
-    r"(let me|i'?ll|i will|now i'?ll|i'?m going to|going to|i need to|i should|first i)\s+"
+    r"(let me|i'?ll|i will|now i'?ll|i'?m going to|we'?re going to|i need to|"
+    r"i should|first i)\s+"
     r"(compile|summar|write|put together|create|draft|save|provide|give|lay out|"
     r"organize|prepare|check|look|locate|find|gather|review|search|pull|read|start)"
     r"\S*[^.!?]*[.!?:]?\s*$", re.IGNORECASE)
@@ -398,10 +427,16 @@ async def _execute_local(item: dict[str, Any], system: str) -> str:
                 args = {}
             content, _err = await _dispatch_tool(tc.function.name, args, goal_id)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
-    return outcome
+    # Same honesty guard as the cloud path: if Qwen only narrated intent ("let me
+    # compile…") instead of delivering, return empty so _run_step fails honestly
+    # rather than saving a bare promise to the vault as if it were a real result.
+    return "" if _needs_action(outcome) else outcome
 
 
-async def _run_step(item: dict[str, Any]) -> None:
+async def _run_step(item: dict[str, Any]) -> bool:
+    """Run one step. Returns True when it produced real output, False on an honest
+    failure (empty/narration-only) so the worker loop can flag the plan as having
+    a failed step even though this path returns normally rather than raising."""
     goal_id, title = item["goal_id"], item["title"]
     await _mark_task(item["task_id"], "running")
     await bus.set_orb("executing", f"Executor working: {title}", ["executor"])
@@ -419,7 +454,7 @@ async def _run_step(item: dict[str, Any]) -> None:
     )
 
     outcome = ""
-    backend = "Opus"
+    backend = _cloud_label()
     # Route to the local model when the toggle is on and it's configured; if the
     # box is unreachable, fall back to the executor model so the step still runs.
     if local_exec and local_llm.configured():
@@ -441,7 +476,7 @@ async def _run_step(item: dict[str, Any]) -> None:
         await bus.emit("executor", "task.failed",
                        f"{title} — the executor didn't produce a result (no research/output). "
                        "Try asking again.", level="error", goal_id=goal_id)
-        return
+        return False
 
     # Make this step's output available to later steps of the same plan.
     _step_outputs.setdefault(goal_id, []).append({"title": title, "outcome": outcome})
@@ -460,6 +495,7 @@ async def _run_step(item: dict[str, Any]) -> None:
         detail = f"{outcome}\n\nSaved to vault: {saved_url}"
     await bus.emit("executor", "task.completed", f"Done ({backend}): {title} — {outcome[:120]}",
                    detail=detail, level="success", goal_id=goal_id)
+    return True
 
 
 # Any output past this saves as a full note. Was 300 (dropped concise but real
@@ -548,8 +584,12 @@ async def worker_loop() -> None:
         try:
             # run the step as a cancellable task so 'stop' can kill it mid-flight
             _current_step_task = asyncio.create_task(_run_step(item))
-            await _current_step_task
+            step_ok = await _current_step_task
             completed_ok = True
+            # an honest failure (empty/narration-only output) returns False rather
+            # than raising, so capture it here or the sign-off says "All wrapped up"
+            if step_ok is False:
+                any_failed = True
         except asyncio.CancelledError:
             await _mark_task(item["task_id"], "cancelled")
             await bus.emit("executor", "task.cancelled",

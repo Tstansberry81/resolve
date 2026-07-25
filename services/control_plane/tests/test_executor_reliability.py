@@ -80,6 +80,19 @@ class PriorContextTest(unittest.TestCase):
         ]:
             self.assertFalse(executor._needs_action(t), t)
 
+    def test_concise_answers_with_filler_leads_not_flagged(self):
+        # concise, COMPLETE answers that merely open with a filler word or "I can"
+        # are real deliverables, not stalls — flagging them discarded good output
+        for t in [
+            "Okay, your account balance is $1,234.56 as of today.",
+            "Sure, the meeting is confirmed for 3pm on Thursday.",
+            "I can confirm the flight departs at 6:40am from gate B12.",
+            # a real writeup ending on a THIRD-person forward-looking clause
+            "The center offers primary care and counseling. The board is going to "
+            "review the new hours next quarter.",
+        ]:
+            self.assertFalse(executor._needs_action(t), t)
+
 
 class AutosaveTest(unittest.TestCase):
     def test_returns_error_when_vault_unconfigured(self):
