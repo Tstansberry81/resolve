@@ -300,6 +300,14 @@ _PROMISE_TAIL_RE = re.compile(
     r"(compile|summar|write|put together|create|draft|save|provide|give|lay out|"
     r"organize|prepare|check|look|locate|find|gather|review|search|pull|read|start)"
     r"\S*[^.!?]*[.!?:]?\s*$", re.IGNORECASE)
+# Same markers, anywhere in the text — used to tell a delivered writeup that
+# happens to end on a forward-looking line from wall-to-wall narration.
+_PROMISE_MARKER_RE = re.compile(
+    r"\b(let me|i'?ll|i will|i'?m going to|i am going to|i need to|i should)\b",
+    re.IGNORECASE)
+# Content ahead of a trailing promise past this length counts as a real delivery.
+_DELIVERED_MIN = 600
+_TAIL_WINDOW = 200
 
 
 def _needs_action(text: str) -> bool:
@@ -310,8 +318,17 @@ def _needs_action(text: str) -> bool:
         return True
     if len(t) < 240 and _INTENT_RE.match(t):
         return True
-    # ends by promising to compile/write the answer → it never delivered it
-    return bool(_PROMISE_TAIL_RE.search(t[-200:]))
+    match = _PROMISE_TAIL_RE.search(t[-_TAIL_WINDOW:])
+    if not match:
+        return False
+    # It ENDS on a promise — but a finished 2000-word report that signs off with
+    # "I'll save this to your vault" is a real delivery, and discarding it is the
+    # same bug as flagging a concise answer. Judge by what came BEFORE the promise.
+    body = t[: max(0, len(t) - _TAIL_WINDOW) + match.start()].strip()
+    if len(body) < _DELIVERED_MIN:
+        return True  # nothing but narration ahead of the promise → a real stall
+    # A long body that is itself wall-to-wall "I'll…/let me…" is still narration.
+    return len(_PROMISE_MARKER_RE.findall(body)) >= 3
 
 
 # back-compat alias
@@ -481,7 +498,12 @@ async def _run_step(item: dict[str, Any]) -> bool:
     # Make this step's output available to later steps of the same plan.
     _step_outputs.setdefault(goal_id, []).append({"title": title, "outcome": outcome})
     while len(_step_outputs) > 6:  # bound memory: keep only recent goals' contexts
-        _step_outputs.pop(next(iter(_step_outputs)), None)
+        # evict oldest-inserted, but never the goal we're mid-plan on — its key was
+        # inserted at step 1, so plain insertion order can drop it under its own feet
+        stale = next((k for k in _step_outputs if k != goal_id), None)
+        if stale is None:
+            break
+        _step_outputs.pop(stale, None)
 
     # GUARANTEE the output lands in the vault — deterministic, not up to the LLM.
     saved_url, save_err = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome))

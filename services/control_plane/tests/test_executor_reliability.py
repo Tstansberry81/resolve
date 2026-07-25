@@ -93,6 +93,23 @@ class PriorContextTest(unittest.TestCase):
         ]:
             self.assertFalse(executor._needs_action(t), t)
 
+    def test_finished_writeup_ending_on_promise_not_flagged(self):
+        # a COMPLETE report that merely signs off with "I'll save this" was being
+        # thrown away by the promise-tail check → empty → honest-failure + no save
+        body = ("The Student Health and Wellness Center at 550 Brandon Ave offers "
+                "primary care, CAPS counseling, gynecology, and disability access. "
+                "Hours are 8am-5pm weekdays with urgent care on weekends. ") * 6
+        for tail in ["I'll save this summary to your vault.",
+                     "Next I'll check the weekend urgent care hours."]:
+            self.assertFalse(executor._needs_action(f"{body}\n{tail}"), tail)
+
+    def test_long_but_wall_to_wall_narration_still_flagged(self):
+        # length alone isn't delivery: a long transcript of nothing but promises
+        t = ("I'll start by searching for the health center details. " * 6
+             + "Now I'm going to look at the hours page. " * 4
+             + "I need to check one more source. Let me compile the summary now.")
+        self.assertTrue(executor._needs_action(t), t)
+
 
 class AutosaveTest(unittest.TestCase):
     def test_returns_error_when_vault_unconfigured(self):
