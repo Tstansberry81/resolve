@@ -241,6 +241,23 @@ async def run_weekly_review() -> str:
     return await run_command(WEEKLY_PROMPT)
 
 
+async def _reindex_vault() -> None:
+    """Refresh the vault's semantic index. Never allowed to break the nightly
+    run: recall is an enhancement, and the literal grep still works without it."""
+    try:
+        from . import vault_index
+        if not vault_index.configured():
+            return
+        stats = await asyncio.to_thread(vault_index.reindex)
+        if stats.get("chunksEmbedded"):
+            await bus.emit("core", "vault.indexed",
+                           f"Vault recall refreshed — {stats['chunksEmbedded']} passages "
+                           f"re-embedded across {stats['filesChanged']} changed notes.",
+                           level="info")
+    except Exception:
+        log.exception("vault reindex failed")
+
+
 async def scheduler_loop() -> None:
     log.info("routine scheduler started")
     while True:
@@ -253,6 +270,10 @@ async def scheduler_loop() -> None:
                 _last_ingest_date = today
                 from . import ingest
                 await ingest.run_daily_ingest()
+                # Re-embed the vault right after the ingest writes the day's notes,
+                # so semantic recall is current by morning. Unchanged chunks are
+                # skipped by hash, so a quiet day costs no embedding calls at all.
+                await _reindex_vault()
             # 6:00 on travel days: flight status + when to leave
             if (now.hour == 6 and now.minute < 10
                     and _last_travel_date != today):

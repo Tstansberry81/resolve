@@ -282,7 +282,7 @@ async def _mark_task(task_id: str, status: str) -> None:
 async def _dispatch_tool(name: str, args: dict[str, Any], goal_id: str) -> tuple[str, bool]:
     """Shared policy + connector execution for both executor backends (Opus and
     local Qwen). Returns (content_str, is_error)."""
-    from .assistant import CONNECTOR_AVAILABLE, TOOL_POLICY, _connector_call, _queue_approval
+    from .assistant import CONNECTOR_AVAILABLE, TOOL_POLICY, _connector_call
 
     action_name, node = TOOL_POLICY.get(name, (None, "web"))
     if action_name is None:

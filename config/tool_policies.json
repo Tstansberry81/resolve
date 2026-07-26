@@ -147,6 +147,30 @@
     },
     "activity.read": {
       "risk": "read"
+    },
+    "world.read": {
+      "risk": "read"
+    },
+    "canvas.read": {
+      "risk": "read"
+    },
+    "music.read": {
+      "risk": "read"
+    },
+    "music.control": {
+      "risk": "reversible_write"
+    },
+    "github.read": {
+      "risk": "read"
+    },
+    "github.issue.create": {
+      "risk": "reversible_write"
+    },
+    "code.write": {
+      "risk": "reversible_write"
+    },
+    "code.review": {
+      "risk": "read"
     }
   }
 }

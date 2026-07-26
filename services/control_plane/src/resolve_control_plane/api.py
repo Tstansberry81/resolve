@@ -307,14 +307,28 @@ def _telegram_gate(request: Request) -> None:
         raise HTTPException(status_code=401, detail="bad webhook secret")
 
 
-async def _run_and_reply(chat_id: object, text: str) -> None:
+async def _run_and_reply(chat_id: object, text: str,
+                         atts: list[dict] | None = None) -> None:
     """Execute a /resolve command and push the answer back to the chat. Runs
     detached: Telegram times the webhook out in seconds and retries on a slow
-    response, which would double-run the command."""
+    response, which would double-run the command.
+
+    Attachments are downloaded and converted HERE rather than in the webhook so
+    the fetch + transcription happen off Telegram's clock too."""
     from .connectors import telegram_notify
 
+    blocks = None
     try:
-        goal_id = await run_command(text)
+        if atts:
+            from . import media
+            blocks, notes = await anyio.to_thread.run_sync(lambda: media.to_blocks(atts))
+            # Transcripts and per-file failures go INTO the prompt, so the assistant
+            # answers the voice note and can say plainly what it couldn't open.
+            if notes:
+                text = ("\n".join(notes) + ("\n\n" + text if text else "")).strip()
+            if not blocks and not text:
+                raise RuntimeError("nothing readable in that message")
+        goal_id = await run_command(text, blocks)
         reply = await _await_reply(goal_id, 50)
         out = reply or "Working on it — check the dashboard for the result."
     except Exception as exc:
@@ -366,25 +380,42 @@ async def telegram_webhook(update: dict) -> dict:
             pass  # the decision already landed; the UI echo is best-effort
         return {"ok": True, "decision": decision, **result}
 
+    from . import media
+
     msg = update.get("message") or {}
     chat_id = (msg.get("chat") or {}).get("id")
-    text = str(msg.get("text") or "").strip()
-    if not text:
-        return {"ok": True, "ignored": "no text"}
+    # Allowlist FIRST: everything below this line spends real money (file
+    # downloads, transcription, a model turn), so it can't run for a stranger.
     if not telegram_notify.chat_allowed(chat_id):
         return {"ok": True, "ignored": "chat not allowed"}
+
+    # A photo's caption is its text. Both may be absent — a bare voice note or a
+    # screenshot with no caption is still a perfectly clear request.
+    text = str(msg.get("text") or msg.get("caption") or "").strip()
+    atts = media.from_telegram(msg)
+    if not text and not atts:
+        return {"ok": True, "ignored": "nothing to act on"}
+
     for cmd in ("/resolve", "/ask"):
         if text == cmd or text.startswith(cmd + " "):
             body = text[len(cmd):].strip()
             break
     else:
-        return {"ok": True, "ignored": "not a command"}
-    if not body:
+        # Sending a photo, PDF, or voice note IS the request — demanding a
+        # /resolve prefix on top of it would be pointless ceremony. Bare text
+        # still needs the prefix so ordinary chatter doesn't fire a paid run.
+        if not atts:
+            return {"ok": True, "ignored": "not a command"}
+        body = text
+    if not body and not atts:
         return {"ok": True, "ignored": "empty command"}
     if not os.getenv("ANTHROPIC_API_KEY"):
         return {"ok": False, "error": "ANTHROPIC_API_KEY not configured"}
-    asyncio.get_running_loop().create_task(_run_and_reply(chat_id, body))
-    return {"ok": True, "queued": True}
+    if atts and not body:
+        # No caption: say what to do with it rather than leaving the model to guess.
+        body = f"I sent you {media.describe(atts)} with no caption — look at it and tell me what's there, or do the obvious thing with it."
+    asyncio.get_running_loop().create_task(_run_and_reply(chat_id, body, atts))
+    return {"ok": True, "queued": True, "attachments": len(atts)}
 
 
 @app.post("/v1/stop", dependencies=[Depends(auth)])

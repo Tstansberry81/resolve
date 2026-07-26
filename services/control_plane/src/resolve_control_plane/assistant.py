@@ -15,7 +15,7 @@ import time
 import uuid
 from collections import deque
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import anthropic
@@ -36,6 +36,24 @@ log = logging.getLogger("resolve.assistant")
 # truncates mid-answer. Every max_tokens in this repo was re-checked for that.
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-opus-5")
 MAX_TURNS = 8
+
+# Anthropic's server-side web search, now available to the ASSISTANT and not just
+# the background executor. This is a cost fix as much as a capability one: without
+# it, "how much is X" or "who won last night" had to be handed to plan_project,
+# which spins up the pricier planner model AND a background executor for a
+# question the assistant could answer in one turn. A search is ~$0.01; a
+# needless plan_project hand-off is many times that.
+#
+# max_uses is the ceiling per assistant turn, deliberately low — the assistant
+# answers questions, it doesn't do deep research (that IS plan_project's job).
+# allowed_callers pins it to direct invocation, matching the executor: web_search
+# otherwise expects to be called from inside code execution, which 400s here.
+ASSISTANT_WEB_SEARCH = {
+    "type": "web_search_20260209",
+    "name": "web_search",
+    "allowed_callers": ["direct"],
+    "max_uses": int(os.getenv("ASSISTANT_WEB_MAX_USES", "3")),
+}
 
 # what to tell Trav to run when his laptop worker is offline
 WORKER_RESTART_CMD = "launchctl kickstart -k gui/$(id -u)/com.resolve.localworker"
@@ -226,6 +244,75 @@ def _connector_call(name: str, args: dict[str, Any],
         return res
     if name == "delete_google_file":
         return composio.delete_file(str(args["file_id"]))
+    if name == "read_google_doc":
+        return composio.read_doc(str(args["document_id"]))
+    if name == "replace_in_google_doc":
+        res = composio.replace_in_doc(str(args["document_id"]), str(args["find_text"]),
+                                      str(args["replace_text"]))
+        # 0 replacements means the find_text wasn't in the doc. Reporting that as
+        # success is exactly the "Done." lie the rest of this file works to prevent.
+        if res.get("replaced") == 0:
+            return {"replaced": 0, "error": "That exact text isn't in the document — "
+                    "read_google_doc first and match the wording exactly."}
+        _log_gdrive_artifact({**res, "title": args.get("name", "Google Doc")}, action="updated")
+        return res
+    if name == "read_google_sheet":
+        return composio.read_sheet(str(args["spreadsheet_id"]),
+                                   str(args.get("range") or "A1:Z200"))
+    if name == "update_google_sheet":
+        res = composio.update_sheet(str(args["spreadsheet_id"]), str(args["range"]),
+                                    args["rows"])
+        _log_gdrive_artifact({**res, "title": args.get("name", "Google Sheet")}, action="updated")
+        return res
+    if name == "draft_email":
+        return composio.create_gmail_draft(str(args["to"]), str(args.get("subject", "")),
+                                           str(args["body"]),
+                                           thread_id=args.get("thread_id") or None)
+    if name == "get_weather":
+        from .connectors import world
+        return world.weather(str(args.get("place") or "Baltimore"), int(args.get("days", 3)))
+    if name == "get_travel_time":
+        from .connectors import world
+        return world.travel_time(str(args["origin"]), str(args["destination"]))
+    if name == "get_canvas":
+        from .connectors import canvas
+        return canvas.upcoming(int(args.get("days", 14)))
+    if name == "spotify_play":
+        return composio.spotify_play(str(args.get("query", "")), str(args.get("uri", "")))
+    if name == "spotify_control":
+        return composio.spotify_control(str(args["action"]))
+    if name == "spotify_search":
+        return composio.spotify_search(str(args["query"]), str(args.get("kind") or "track"))
+    if name == "spotify_now_playing":
+        return composio.spotify_now_playing()
+    if name == "vault_recall":
+        from . import vault_index
+        return vault_index.search(str(args["query"]))
+    if name == "code_task":
+        from . import coder, local
+        if not local.online():
+            return {"error": "Trav's laptop worker is offline, so there's nothing to code "
+                             "with. Ask him to bring it back up, then retry."}
+        brief = coder.plan(str(args["objective"]), str(args.get("context", "")))
+        task = coder.build_brief(str(args["objective"]), brief, str(args.get("path", "")))
+        res = local.enqueue(task, goal_id=goal_id)
+        return {**res, "architectBrief": brief[:1500]}
+    if name == "review_code":
+        from . import coder
+        return {"review": coder.review(str(args["diff"]), str(args.get("objective", "")))}
+    if name == "github_issues":
+        from .connectors import github_api
+        return github_api.list_issues(args.get("repo"), str(args.get("state") or "open"))
+    if name == "github_pull_requests":
+        from .connectors import github_api
+        return github_api.list_pull_requests(args.get("repo"), str(args.get("state") or "open"))
+    if name == "github_ci":
+        from .connectors import github_api
+        return github_api.ci_status(args.get("repo"))
+    if name == "create_github_issue":
+        from .connectors import github_api
+        return github_api.create_issue(str(args["title"]), str(args.get("body", "")),
+                                       args.get("repo"), args.get("labels"))
     raise ValueError(f"unknown tool {name}")
 
 
@@ -514,11 +601,11 @@ async def _command_processor() -> None:
     global _current_goal, _current_task
     assert _cmd_queue is not None
     while True:
-        goal_id, text = await _cmd_queue.get()
+        goal_id, text, blocks = await _cmd_queue.get()
         _current_goal = goal_id
         try:
             # run as a cancellable task so 'stop' can kill it mid-flight
-            _current_task = asyncio.create_task(_loop(goal_id, text))
+            _current_task = asyncio.create_task(_loop(goal_id, text, blocks))
             await _current_task
         except asyncio.CancelledError:
             pass  # stopped on purpose
@@ -583,15 +670,18 @@ async def stop_current() -> dict[str, Any]:
             "cancelledApprovals": dropped_approvals, **ex_result}
 
 
-async def run_command(text: str) -> str:
+async def run_command(text: str, blocks: list[dict[str, Any]] | None = None) -> str:
     """Accept a command; returns the goal id. Runs are SERIALIZED — if one is
     already in flight, this waits in line and never interrupts it. EXCEPT a
-    'stop' command, which jumps the line and cancels the running task."""
+    'stop' command, which jumps the line and cancels the running task.
+
+    `blocks` carries attachments (images, PDFs) as Anthropic content blocks — see
+    media.py. They ride alongside the text into a single user turn."""
     if _is_stop(text):
         busy = (_current_goal is not None
                 or (_cmd_queue is not None and not _cmd_queue.empty())
                 or executor.is_working())
-        res = await stop_current()
+        await stop_current()
         reply = ("Stopped." if busy else "Nothing was running, but I'm clear and standing by.")
         await bus.emit("assistant", "assistant.reply", reply, detail=reply, level="success")
         return "stopped"
@@ -627,11 +717,11 @@ async def run_command(text: str) -> str:
             "Queued — I'll finish what I'm doing first, then get to this.",
             detail=text, goal_id=goal_id,
         )
-    await _cmd_queue.put((goal_id, text))
+    await _cmd_queue.put((goal_id, text, blocks))
     return goal_id
 
 
-async def _loop(goal_id: str, text: str) -> None:
+async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = None) -> None:
     # goal.accepted is emitted in run_command (so it shows immediately, even when
     # queued). Here we just flip the orb busy as this task actually starts.
     client = anthropic.AsyncAnthropic()
@@ -661,10 +751,25 @@ async def _loop(goal_id: str, text: str) -> None:
     for prior_user, prior_reply in history:
         messages.append({"role": "user", "content": prior_user})
         messages.append({"role": "assistant", "content": prior_reply})
-    messages.append({"role": "user", "content": text})
+    # Attachments ride in the SAME user turn as the text, images first — Claude
+    # reads a picture better when the question about it comes after the picture.
+    if blocks:
+        # Cache-mark the attachment turn. This loop runs up to MAX_TURNS times and
+        # re-sends the whole transcript each time, so without a breakpoint here an
+        # image gets billed in full on all 8 turns. It sits at a stable prefix
+        # (later turns only append), so turns 2+ read it back at 0.1x.
+        attachment_turn = [*blocks, {"type": "text", "text": text,
+                                     "cache_control": {"type": "ephemeral"}}]
+        messages.append({"role": "user", "content": attachment_turn})
+    else:
+        messages.append({"role": "user", "content": text})
     # Only offer the local-model tool when the exec toggle is on — otherwise
     # Sonnet must never route to Qwen (it's likely offline and it's opt-in).
     active_tools = TOOLS if executor.local_exec else [t for t in TOOLS if t["name"] != "ask_local"]
+    # Server-side web search rides alongside the client tools. It never comes back
+    # as a `tool_use` block (Anthropic runs it and returns the results inline), so
+    # the dispatch loop below never sees it and needs no policy entry.
+    active_tools = [*active_tools, ASSISTANT_WEB_SEARCH]
     final_text = ""
     tools_ran = False   # did any tool actually execute this request?
     nudges = 0          # anti-hallucination re-prompts used
@@ -682,6 +787,13 @@ async def _loop(goal_id: str, text: str) -> None:
                 messages=messages,
             )
             costs.record("assistant", ASSISTANT_MODEL, resp.usage)
+            # A server-side tool (web search) hit its internal iteration limit
+            # mid-turn. The work so far is intact — echo it back and let it
+            # resume, otherwise the turn below reads as "ended without calling a
+            # tool" and gets nudged, throwing away the search it just paid for.
+            if resp.stop_reason == "pause_turn":
+                messages.append({"role": "assistant", "content": resp.content})
+                continue
             tool_uses = [b for b in resp.content if b.type == "tool_use"]
             texts = [b.text for b in resp.content if b.type == "text"]
             # Cut off mid-response by the token cap — usually a truncated tool
@@ -846,7 +958,10 @@ async def _loop(goal_id: str, text: str) -> None:
         if not final_text:
             final_text = "Done." if (tools_ran or pending_actions) else (
                 "I couldn't complete that — nothing was created. Mind trying again?")
-        history.append((text, final_text))
+        # History keeps a TEXT stand-in for attachments, never the blocks: replaying
+        # an image on every later turn would re-bill the same picture up to 8 times.
+        # The reply itself describes what was in it, so follow-ups still have context.
+        history.append((f"[sent an attachment] {text}" if blocks else text, final_text))
         await bus.emit(
             "assistant", "assistant.reply", final_text[:160],
             detail=final_text or None, level="success", goal_id=goal_id,

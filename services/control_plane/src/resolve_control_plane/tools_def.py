@@ -42,6 +42,25 @@ TOOL_POLICY = {
     "edit_google_sheet": ("gdrive.edit", "google"),
     "add_google_slides": ("gdrive.edit", "google"),
     "delete_google_file": ("gdrive.delete", "google"),
+    "read_google_doc": ("gdrive.read", "google"),
+    "replace_in_google_doc": ("gdrive.edit", "google"),
+    "read_google_sheet": ("gdrive.read", "google"),
+    "update_google_sheet": ("gdrive.edit", "google"),
+    "draft_email": ("email.draft", "gmail"),
+    "get_weather": ("world.read", "web"),
+    "get_travel_time": ("world.read", "web"),
+    "get_canvas": ("canvas.read", "canvas"),
+    "spotify_play": ("music.control", "spotify"),
+    "spotify_control": ("music.control", "spotify"),
+    "spotify_search": ("music.read", "spotify"),
+    "spotify_now_playing": ("music.read", "spotify"),
+    "vault_recall": ("vault.read", "vault"),
+    "github_issues": ("github.read", "github"),
+    "github_pull_requests": ("github.read", "github"),
+    "github_ci": ("github.read", "github"),
+    "create_github_issue": ("github.issue.create", "github"),
+    "code_task": ("code.write", "coder"),
+    "review_code": ("code.review", "coder"),
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -429,6 +448,233 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "code_task",
+        "description": "Write or change CODE in one of Trav's projects on his laptop. A coding architect first reads the objective and writes a file-level brief, then the laptop agent implements it against the real repo and runs the tests. Use for 'fix the bug in X', 'add feature Y to Z', 'make the tests pass'. Give the full objective and the project path if you know it. Runs in the background and streams into the feed; shell commands there ask for Trav's approval.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "objective": {"type": "string", "description": "What the code should do differently, in full"},
+                "path": {"type": "string", "description": "Project folder on his Mac, e.g. ~/claude/resolve"},
+                "context": {"type": "string", "description": "Anything Trav said about the project that the architect should know"},
+            },
+            "required": ["objective"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "review_code",
+        "description": "Have an independent reviewer model read a diff and report real problems, ranked by severity. Use when Trav pastes a diff, asks 'does this look right', or after a code_task produces changes he wants checked.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "diff": {"type": "string", "description": "The diff or code to review"},
+                "objective": {"type": "string", "description": "What the change was meant to do"},
+            },
+            "required": ["diff"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "github_issues",
+        "description": "Open issues on one of Trav's GitHub repos. Omit repo to use his default repo. Use for 'what's open on X', 'what am I working on', or before creating an issue so you don't file a duplicate.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "owner/name, e.g. Tstansberry81/resolve"},
+                "state": {"type": "string", "enum": ["open", "closed", "all"]},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "github_pull_requests",
+        "description": "Open pull requests on a GitHub repo (omit repo for his default).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string"},
+                "state": {"type": "string", "enum": ["open", "closed", "all"]},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "github_ci",
+        "description": "Recent GitHub Actions runs for a repo, with failures highlighted. THE answer to 'did the build pass', 'is CI green', or 'did I break anything'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"repo": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "create_github_issue",
+        "description": "File a GitHub issue on one of Trav's repos — use to capture a bug, an idea, or a TODO he mentions so it isn't lost. Check github_issues first to avoid duplicates. Write a real, specific body, not a placeholder.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "body": {"type": "string", "description": "Markdown: what's wrong / what to do, and why"},
+                "repo": {"type": "string"},
+                "labels": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "vault_recall",
+        "description": "Search Trav's vault BY MEANING rather than exact words — use when vault_read's keyword search finds nothing but you believe he's written about it, or when you don't know the wording he used ('what did I decide about X', 'have I written about Y before'). Returns matching passages with their file paths; vault_read the path for the full note.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "What you're looking for, in plain language"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "read_google_doc",
+        "description": "Read an existing Google Doc's full text. Get the document_id from create_google_doc or find_google_file. ALWAYS read a doc before editing it — you need to see the exact wording to replace.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"document_id": {"type": "string"}},
+            "required": ["document_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "replace_in_google_doc",
+        "description": "Find and replace text inside an existing Google Doc — this is how you EDIT or FIX a doc (edit_google_doc only appends to the end). Read the doc first, then pass the exact existing text as find_text. To delete text, pass an empty replace_text. To rewrite a paragraph, find the old paragraph and replace it with the new one.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "string"},
+                "find_text": {"type": "string", "description": "Exact text currently in the doc"},
+                "replace_text": {"type": "string", "description": "What to put there instead (empty string deletes it)"},
+                "name": {"type": "string", "description": "Optional doc name for the activity log"},
+            },
+            "required": ["document_id", "find_text", "replace_text"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "read_google_sheet",
+        "description": "Read cells from an existing Google Sheet. Give an A1 range like 'Sheet1!A1:D50' (defaults to A1:Z200). Read before updating so you know which row/cell to change.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "spreadsheet_id": {"type": "string"},
+                "range": {"type": "string", "description": "A1 notation, e.g. Sheet1!A1:D50"},
+            },
+            "required": ["spreadsheet_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "update_google_sheet",
+        "description": "Overwrite a specific range of cells in a Google Sheet (edit_google_sheet only appends new rows at the bottom). Use for correcting a value, updating a status column, or fixing a row. Values starting with '=' become real formulas.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "spreadsheet_id": {"type": "string"},
+                "range": {"type": "string", "description": "Exact A1 range to overwrite, e.g. Sheet1!B2:C3"},
+                "rows": {"type": "array", "description": "Rows of values, as an array of arrays, matching the range's shape.", "items": {"type": "array", "items": {"type": "string"}}},
+                "name": {"type": "string", "description": "Optional sheet name for the activity log"},
+            },
+            "required": ["spreadsheet_id", "range", "rows"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "draft_email",
+        "description": "Save a DRAFT email in Trav's Gmail for him to review, edit, and send himself from his phone or laptop. Nothing is sent. Prefer this over send_email whenever he hasn't explicitly said to send it — and use it for every reply you write during an inbox triage, so the drafts are waiting for him in Gmail instead of trapped in this chat.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient email address"},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+                "thread_id": {"type": "string", "description": "Optional Gmail thread id to reply inside; omit the subject when replying to a thread."},
+            },
+            "required": ["to", "body"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_weather",
+        "description": "Current conditions and a daily forecast for a place (defaults to Baltimore). Use for any weather question and before advising on travel, outdoor plans, or what to wear.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "place": {"type": "string", "description": "City or place name, e.g. Charlottesville"},
+                "days": {"type": "integer", "description": "Forecast days, 1-7 (default 3)"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_travel_time",
+        "description": "Driving time and distance between two places. Use for 'how long to get to X', and to work out when Trav needs to leave for something on his calendar.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "origin": {"type": "string"},
+                "destination": {"type": "string"},
+            },
+            "required": ["origin", "destination"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_canvas",
+        "description": "Trav's upcoming Canvas coursework — assignment titles, courses, and due dates from his Canvas calendar feed. THE source for 'what's due', homework, and school deadlines. Note it covers due dates only: for grades, submission status, or announcements, use run_on_laptop to open Canvas in his logged-in browser.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer", "description": "How far ahead to look, 1-60 (default 14)"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "spotify_play",
+        "description": "Play music on Trav's Spotify. Pass a query like 'Bad Bunny Tití Me Preguntó' to find and play a track, or omit everything to resume what's paused. Needs an active Spotify device (a phone/Mac/speaker with Spotify open).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to play — song, or 'song by artist'"},
+                "uri": {"type": "string", "description": "Exact Spotify URI, if you already have one from spotify_search"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "spotify_control",
+        "description": "Pause, skip forward, or go back on Trav's Spotify.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"action": {"type": "string", "enum": ["pause", "next", "previous"]}},
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "spotify_search",
+        "description": "Search Spotify for a track, album, artist, or playlist and get its URI. Use when Trav wants options rather than immediate playback.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "kind": {"type": "string", "enum": ["track", "album", "artist", "playlist"]},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "spotify_now_playing",
+        "description": "What's playing on Trav's Spotify right now.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "name": "delete_google_file",
         "description": "Permanently delete a file in Trav's Google Drive by id (irreversible). Get the file_id from find_google_file first. Requires Trav's approval before it runs.",
         "input_schema": {
@@ -470,10 +716,14 @@ How you operate:
 - Use ISO 8601 datetimes with the America/New_York offset for calendar writes.
 - send_email only queues for Trav's approval; tell him it's waiting on his approval banner.
 - INBOX TRIAGE ("triage my inbox", "clean up my email"): call get_inbox_recent, then sort
-  the messages yourself into (a) needs-a-reply — draft each reply IN YOUR ANSWER for Trav to
-  approve/send, (b) worth a look — one line each, (c) junk/newsletters/promos — archive via ONE
+  the messages yourself into (a) needs-a-reply — write each reply with draft_email so it's
+  waiting in his Gmail to edit and send from his phone, then list what you drafted,
+  (b) worth a look — one line each, (c) junk/newsletters/promos — archive via ONE
   archive_emails call with all their uids + a reason. The archive queues a single approval
   banner; never archive anything that plausibly needs Trav's eyes, and never send during triage.
+- EMAIL, generally: draft_email saves a draft and sends nothing — that's the default when
+  Trav hasn't explicitly told you to send. send_email actually sends and always needs his
+  approval. When in doubt, draft it.
 - Deletes (delete_task, delete_calendar_event) also queue for approval — look up the id first,
   then call the delete tool and tell him it's waiting on his banner.
 - When Trav wants something done ON his laptop (his files, running a command, reading a web
@@ -487,9 +737,40 @@ How you operate:
   shopping search with live prices + links). Give Trav the top few as name — price — link.
 - For Google Docs/Sheets/Slides, use create_google_doc / create_google_sheet / create_google_slides.
   Write real content (Markdown), not placeholders, and give Trav the returned link.
-  To change an existing file, call find_google_file to get its id, then edit_google_doc /
-  edit_google_sheet / add_google_slides. To remove one, find it then delete_google_file
-  (permanent delete — it asks for Trav's approval first).
+  To CHANGE an existing file: find_google_file for its id, then READ it (read_google_doc /
+  read_google_sheet) before you touch it, then edit. Editing has two different shapes and
+  picking the wrong one is a common mistake:
+    * to FIX, REWRITE, or DELETE existing content -> replace_in_google_doc /
+      update_google_sheet (they change what's already there);
+    * to ADD to the end -> edit_google_doc / edit_google_sheet / add_google_slides.
+  replace_in_google_doc needs the exact current wording, which is why you read first — if it
+  replaces 0 occurrences nothing changed, so re-read and try again rather than claiming success.
+  To remove a file, find it then delete_google_file (permanent — asks for approval first).
+- SCHOOL: get_canvas gives Trav's upcoming assignments and due dates. Use it for anything
+  about homework, deadlines, or what's due, and combine it with get_calendar when planning
+  his week. It covers due dates only — for grades, whether something was submitted, or
+  announcements, use run_on_laptop to check Canvas in his logged-in browser.
+- get_weather and get_travel_time are cheap and keyless — use them freely. Check the weather
+  before advising on anything outdoors or travel-related, and use get_travel_time plus his
+  calendar to tell him when to leave. Travel time ignores live traffic, so pad it at rush hour.
+- MUSIC: spotify_play / spotify_control / spotify_now_playing drive his Spotify. Playback
+  needs an active device — if it says there isn't one, tell him to open Spotify somewhere first.
+- MEMORY: vault_read greps his vault for exact words; vault_recall searches it by MEANING.
+  When he refers to something he's told you before ('what did I decide about…', 'the thing I
+  wrote on…') and the keyword search comes back empty, try vault_recall before concluding it
+  isn't there — he rarely uses the same words twice.
+- CODE: code_task writes or changes code in his projects (an architect plans it, then his
+  laptop implements and runs the tests). review_code gets an independent read on a diff.
+  github_issues / github_pull_requests / github_ci answer what's open and whether the build
+  passed; create_github_issue captures a bug or idea he mentions so it isn't lost.
+- ATTACHMENTS: Trav can send you photos, screenshots, PDFs, and voice notes from
+  Telegram — they arrive in his message and you can see/read them directly. A voice
+  note arrives already transcribed as a line starting 'Voice note, transcribed:';
+  treat it as him talking to you and answer the request, don't just repeat it back.
+  When he sends something with no caption, don't stop at describing it — do the
+  obvious next thing (a receipt goes to his finance/vault notes, an error
+  screenshot gets diagnosed, an event flyer becomes a calendar event, a document
+  gets saved). Read it, then ACT with your tools.
 - EXECUTION DISCIPLINE (critical): When Trav asks for something, DO IT this turn by
   calling the tool — never announce that you're "about to", "creating it now", "on it",
   "give me a sec", or that you'll do it. Those phrases without an actual tool call are
@@ -515,14 +796,19 @@ How you operate:
   tools you have (a doc, a calendar event, a task, checking email/finance, opening things,
   a vault read/save), just do it directly. Do NOT hand those off — handing off spins up a
   pricier planner model, so it must earn it.
-- BUT you have NO web-search tool. Anything that needs current/external info, web research,
-  comparing options, or gathering facts you don't already have MUST go to plan_project —
-  only the background executor can search the web; if you try to answer it yourself you'll
-  just guess, which is unacceptable. Also use plan_project for goals needing 3+ DEPENDENT
-  steps or sustained background work (staged builds, bulk/multi-part work).
-- So: web research or a real multi-step project -> plan_project ONCE with the full objective
-  (it plans + runs in the background and can research the web); tell Trav it's queued and list
-  the steps. Everything you can finish with your own tools -> just do it. When unsure whether
-  it needs the web, prefer plan_project over guessing."""
+- YOU CAN SEARCH THE WEB (web_search). Use it whenever the answer depends on current or
+  external facts: prices, news, scores, hours, "what is X", "is Y still true", release dates,
+  documentation, anything after your training cutoff. NEVER guess at a fact you could look
+  up, and never tell Trav you can't look something up. Searching costs real money though, so
+  don't search what you already know or what's in his calendar/email/vault — check your own
+  tools first. Cite the source with a link when the answer came off the web.
+- plan_project is NOT for questions anymore. Hand off ONLY genuine projects: 3+ DEPENDENT
+  steps, sustained background work, a staged build, bulk/multi-part work, or deep research
+  that needs many sources and a written writeup. A question you can answer with a search or
+  two — even a few searches — you answer YOURSELF, right now. Handing those off spins up a
+  pricier planner and makes Trav wait for a background run he shouldn't have to wait for.
+- So: a question, a lookup, a comparison -> search and answer it yourself. A real
+  multi-step project or deep research writeup -> plan_project ONCE with the full objective;
+  tell Trav it's queued and list the steps. Everything else -> just do it with your tools."""
 
 
