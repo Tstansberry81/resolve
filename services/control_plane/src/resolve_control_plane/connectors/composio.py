@@ -198,6 +198,70 @@ def edit_doc(document_id: str, text: str) -> dict:
     return {"url": f"https://docs.google.com/document/d/{document_id}/edit", "id": document_id}
 
 
+def read_doc(document_id: str, limit: int = 40_000) -> dict:
+    """Read a Google Doc back as plain text.
+
+    Append-only editing was half a feature: RESOLVE could write a doc and never
+    look at it again, so "fix the intro" or "what did we say about X" was
+    impossible and it had to guess at content it wrote itself. Reading first is
+    also what makes replace_in_doc safe — you match text you've actually seen."""
+    data = execute("GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT", {"document_id": document_id})
+    text = ""
+    for key in ("plain_text", "plaintext", "text", "content"):
+        if isinstance(data.get(key), str):
+            text = data[key]
+            break
+    truncated = len(text) > limit
+    return {"id": document_id, "content": text[:limit], "truncated": truncated,
+            "url": f"https://docs.google.com/document/d/{document_id}/edit"}
+
+
+def replace_in_doc(document_id: str, find_text: str, replace_text: str,
+                   match_case: bool = False) -> dict:
+    """Find-and-replace inside an existing Google Doc — the actual edit primitive.
+
+    Deleting is `replace_text=""`. Rewriting a section means replacing its old
+    text with the new text. Everything append-only couldn't do routes through here.
+    """
+    if not find_text:
+        raise ValueError("find_text can't be empty — that would match nothing.")
+    data = execute("GOOGLEDOCS_REPLACE_ALL_TEXT", {
+        "document_id": document_id, "find_text": find_text,
+        "replace_text": replace_text, "match_case": match_case,
+    })
+    # The API reports how many matches it changed; 0 means the text wasn't found,
+    # which must surface as a failure rather than a cheerful "done".
+    changed = data.get("occurrences_changed", data.get("occurrencesChanged"))
+    return {"id": document_id, "replaced": changed,
+            "url": f"https://docs.google.com/document/d/{document_id}/edit"}
+
+
+def read_sheet(spreadsheet_id: str, cell_range: str = "A1:Z200") -> dict:
+    """Read cells out of a Google Sheet so the model can work off real values
+    instead of assuming what's in the tracker it wrote last week."""
+    data = execute("GOOGLESHEETS_VALUES_GET",
+                   {"spreadsheet_id": spreadsheet_id, "range": cell_range})
+    values = data.get("values") or []
+    return {"id": spreadsheet_id, "range": cell_range, "rows": values[:200],
+            "url": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"}
+
+
+def update_sheet(spreadsheet_id: str, cell_range: str, rows: list[list]) -> dict:
+    """Overwrite a specific range in a Google Sheet.
+
+    Distinct from edit_sheet, which only appends to the bottom. Correcting one
+    cell, updating a column of statuses, or fixing a bad row all need this.
+    USER_ENTERED so a typed '=SUM(...)' becomes a real formula and '5' a number,
+    matching what Trav would get typing it himself.
+    """
+    execute("GOOGLESHEETS_VALUES_UPDATE", {
+        "spreadsheet_id": spreadsheet_id, "range": cell_range,
+        "values": rows, "value_input_option": "USER_ENTERED",
+    })
+    return {"id": spreadsheet_id, "range": cell_range, "rowsWritten": len(rows),
+            "url": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"}
+
+
 def edit_sheet(spreadsheet_id: str, rows: list[list], sheet: str | None = None) -> dict:
     """Append rows to a Google Sheet (defaults to the Sheet1 tab)."""
     _sheet_append(spreadsheet_id, sheet or "Sheet1", rows)
@@ -219,6 +283,112 @@ def delete_file(file_id: str) -> dict:
     """Permanently delete a Drive file (irreversible — approval-gated upstream)."""
     execute("GOOGLEDRIVE_GOOGLE_DRIVE_DELETE_FOLDER_OR_FILE_ACTION", {"fileId": file_id})
     return {"deleted": True, "id": file_id}
+
+
+def create_gmail_draft(to: str, subject: str, body: str,
+                       thread_id: str | None = None) -> dict:
+    """Put a draft in Trav's Gmail rather than only in the chat.
+
+    send_email is approval-gated and fires immediately on approval. A draft is
+    the softer half of that: RESOLVE writes it, Gmail holds it, and Trav edits
+    and sends from his phone in the native app on his own time. That's what
+    inbox triage actually wants — it drafts replies today, but they live in a
+    chat message he has to copy out by hand.
+    """
+    args: dict = {"recipient_email": to, "body": body, "is_html": False}
+    # Gmail keeps a draft in the same thread only when the subject is omitted;
+    # setting one forks a new thread, which is never what a reply wants.
+    if thread_id:
+        args["thread_id"] = thread_id
+    else:
+        args["subject"] = subject
+    data = execute("GMAIL_CREATE_EMAIL_DRAFT", args)
+    draft_id = data.get("id") or data.get("draft_id") or ""
+    return {"drafted": True, "draftId": draft_id, "to": to, "subject": subject,
+            "url": "https://mail.google.com/mail/u/0/#drafts"}
+
+
+# --- Spotify ---------------------------------------------------------------
+# Trav has Premium (required — the playback endpoints 403 without it) and TWO
+# connected Spotify accounts, so Composio can't pick one on its own. Pin the
+# right one with COMPOSIO_ACCOUNTS='{"spotify":"spotify_acture-borago"}'; without
+# it playback calls fail with an account-selection error, which _spotify_hint
+# below turns into an instruction instead of a stack trace.
+
+def _spotify(slug: str, args: dict | None = None) -> dict:
+    try:
+        return execute(slug, args or {})
+    except RuntimeError as exc:
+        raise RuntimeError(_spotify_hint(str(exc))) from exc
+
+
+def _spotify_hint(msg: str) -> str:
+    low = msg.lower()
+    if "no active device" in low or "404" in low:
+        return ("No active Spotify device — open Spotify on your phone, Mac, or a "
+                "speaker and play something for a second, then ask me again.")
+    if "premium" in low or "403" in low:
+        return "Spotify says that needs Premium on the account RESOLVE is connected to."
+    if "account" in low and "select" in low:
+        return ("Two Spotify accounts are connected, so I can't tell which to use — "
+                "set COMPOSIO_ACCOUNTS with a \"spotify\" entry to pin one.")
+    return msg
+
+
+def spotify_search(query: str, kind: str = "track", limit: int = 5) -> dict:
+    data = _spotify("SPOTIFY_SEARCH_FOR_ITEM",
+                    {"q": query, "type": [kind], "limit": max(1, min(limit, 10))})
+    items = (((data.get(kind + "s") or {}).get("items")) or [])[:limit]
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        artists = ", ".join(a.get("name", "") for a in (it.get("artists") or [])
+                            if isinstance(a, dict))
+        out.append({"name": it.get("name"), "artist": artists, "uri": it.get("uri")})
+    return {"query": query, "kind": kind, "results": out}
+
+
+def spotify_play(query: str = "", uri: str = "") -> dict:
+    """Play something, or resume if given neither.
+
+    A track URI goes in `uris`; an album/playlist/artist URI is a `context_uri`.
+    Sending the wrong one is a silent no-op, so the shape is chosen from the URI.
+    """
+    target = uri
+    label = uri
+    if not target and query:
+        found = spotify_search(query, "track", 1)["results"]
+        if not found:
+            return {"played": False, "note": f"Couldn't find anything on Spotify for “{query}”."}
+        target, label = found[0]["uri"], f'{found[0]["name"]} — {found[0]["artist"]}'
+    args: dict = {}
+    if target:
+        args["uris" if ":track:" in target else "context_uri"] = (
+            [target] if ":track:" in target else target)
+    _spotify("SPOTIFY_START_RESUME_PLAYBACK", args)
+    return {"played": True, "what": label or "resumed"}
+
+
+def spotify_control(action: str) -> dict:
+    slug = {"pause": "SPOTIFY_PAUSE_PLAYBACK",
+            "next": "SPOTIFY_SKIP_TO_NEXT",
+            "previous": "SPOTIFY_SKIP_TO_PREVIOUS"}.get(action)
+    if not slug:
+        raise ValueError(f"unknown playback action: {action}")
+    _spotify(slug)
+    return {"ok": True, "action": action}
+
+
+def spotify_now_playing() -> dict:
+    data = _spotify("SPOTIFY_GET_PLAYBACK_STATE")
+    item = data.get("item") or {}
+    if not item:
+        return {"playing": False, "note": "Nothing's playing right now."}
+    artists = ", ".join(a.get("name", "") for a in (item.get("artists") or [])
+                        if isinstance(a, dict))
+    return {"playing": bool(data.get("is_playing")), "track": item.get("name"),
+            "artist": artists, "album": (item.get("album") or {}).get("name")}
 
 
 def _price_value(row: dict) -> float | None:

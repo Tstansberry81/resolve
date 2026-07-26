@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "resolve-control-plane"
-version = "0.3.0"
+version = "0.5.0"
 description = "Durable goal orchestration and policy control plane for RESOLVE"
 requires-python = ">=3.11"
 dependencies = [

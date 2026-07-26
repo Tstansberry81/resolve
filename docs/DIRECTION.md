@@ -61,8 +61,44 @@ Rules of thumb:
 - **System vitals:** top-left dropdown showing status at a glance; expanding reveals per-agent and
   system detail.
 
+## Connector decisions (2026-07-26)
+
+Recorded because in each case the obvious path was rejected for a specific reason.
+
+- **Canvas — ICS calendar feed, not the API.** UVA doesn't issue students Canvas API
+  tokens, so `/api/v1/courses/:id/assignments` is closed to us. Every Canvas user can
+  generate a personal calendar feed (Calendar → "Calendar Feed"), a secret ICS URL
+  carrying assignments and due dates across all courses, needing no institutional
+  approval. That covers due dates — the 90% that drives the week. Grades, submission
+  status, and announcements genuinely need a session, so they route through the laptop
+  worker's already-logged-in browser instead of being faked.
+- **Weather and travel — Open-Meteo and OSRM, not Google Maps.** Both are keyless and
+  free: one less secret in Render, no billing account, no per-call cost. Google buys
+  turn-by-turn navigation and live traffic, neither of which the "when do I leave"
+  question needs. The traffic gap is stated in the tool's own output rather than
+  hidden, so travel estimates aren't quietly optimistic at rush hour.
+- **GitHub — direct REST, not Composio.** `GITHUB_TOKEN` already exists for the vault;
+  going direct is one hop instead of two and sidesteps connected-account ambiguity.
+- **Coding sandbox — the laptop worker, not E2B/Daytona.** The worker already executes
+  shell in a sandboxed workspace behind an approval gate. Paying for a second execution
+  environment buys one thing we don't have: running code while the laptop is offline.
+  `code_task` currently refuses in that case rather than pretending. Revisit if that
+  refusal turns out to bite often; until then it's a paid dependency for capability
+  that already exists.
+- **Vault recall complements grep, it does not replace it.** The laptop's exact grep
+  stays the first stop: free, instant, and exact. Embeddings are for when Trav doesn't
+  remember the words he used.
+
 ## Open items (waiting on Trav)
 
 - Further UI instructions and AI lineup details promised ("more instructions later").
-- Fixes queued from the Render deploy session.
 - Haiku-as-assistant trial after Sonnet baseline exists.
+- **Microsoft Graph** — still unbuilt. It needs an Azure app registration plus an OAuth
+  consent flow that only Trav can complete in the portal; writing the connector before
+  that exists would ship dead code that looks finished. Worth doing if school Outlook
+  and Teams matter day to day.
+- **Duplex voice** — voice INPUT is done both ways (Telegram notes are transcribed;
+  the dashboard has wake word + STT + TTS). A true realtime conversation loop on
+  `gpt-realtime-1.5` is a substantial frontend build and hasn't started.
+- **Autopilot mode** — the policy engine has supported it since the beginning and
+  nothing runs in it. Phase 6 remains untouched.
