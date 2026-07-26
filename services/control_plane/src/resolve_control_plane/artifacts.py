@@ -79,6 +79,32 @@ def record_vault(path: str, *, action: str = "created",
                   href=vault_href(path), action=action, goal_id=goal_id)
 
 
+def record_failure(name: str, reason: str, *, goal_id: str | None = None) -> dict[str, Any]:
+    """Log work that was attempted and produced NOTHING.
+
+    The dock is the source of truth for what actually got done, and silence is
+    ambiguous — a step that died and a step that never ran look identical if
+    only successes are recorded. A failure row makes "nothing was produced"
+    something Trav can see instead of something he has to infer. No href: there
+    is no file, and inventing one is the exact lie this is here to prevent.
+    """
+    art = _build(name, "", location="none", href="", action=f"FAILED — {reason}"[:160],
+                 goal_id=goal_id)
+    art["kind"] = "failed"
+    art["href"] = ""
+    _recent.insert(0, art)
+    del _recent[MAX_RECENT:]
+    bus._fanout({"kind": "artifact", "artifact": art})
+    try:
+        row = {"event_type": _ARTIFACT_TYPE, "actor": "resolve", "payload": art}
+        if goal_id and len(str(goal_id)) == 36:
+            row["goal_id"] = goal_id
+        store.insert("agent_events", row)
+    except Exception:
+        pass
+    return art
+
+
 def recent() -> list[dict[str, Any]]:
     return list(_recent)
 

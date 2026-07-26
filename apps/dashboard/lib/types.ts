@@ -87,7 +87,9 @@ export interface Approval {
 export interface Artifact {
   id: string;
   goalId: string;
-  kind: "report" | "study_guide" | "pull_request" | "draft" | "audio" | "file";
+  /** "failed" = attempted and produced nothing. The dock is the source of
+   *  truth for what got done, so a dead step has to be visible in it. */
+  kind: "report" | "study_guide" | "pull_request" | "draft" | "audio" | "file" | "failed";
   name: string;
   meta: string;
   ts: number;

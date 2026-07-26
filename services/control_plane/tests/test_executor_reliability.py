@@ -145,5 +145,40 @@ class AutosaveTest(unittest.TestCase):
         self.assertIsNone(err)
 
 
+class FailureArtifactTest(unittest.TestCase):
+    """The Artifacts dock is the source of truth for what got done, so a step
+    that produced nothing has to leave a row — otherwise a dead step and a step
+    that never ran are indistinguishable."""
+
+    def setUp(self):
+        from resolve_control_plane import artifacts
+        self.artifacts = artifacts
+        artifacts._recent.clear()
+
+    def tearDown(self):
+        self.artifacts._recent.clear()
+
+    def _record(self, *a, **kw):
+        with mock.patch.object(self.artifacts.store, "insert"), \
+             mock.patch.object(self.artifacts.bus, "_fanout"):
+            return self.artifacts.record_failure(*a, **kw)
+
+    def test_failure_row_has_no_link_to_a_file_that_doesnt_exist(self):
+        art = self._record("Research McIntire", "no output produced")
+        self.assertEqual(art["kind"], "failed")
+        self.assertFalse(art["href"])  # never invent a link to a missing file
+        self.assertIn("FAILED", art["action"])
+        self.assertIn("no output produced", art["meta"] + art["action"])
+
+    def test_failure_shows_up_in_the_dock(self):
+        self._record("Research McIntire", "no output produced")
+        self.assertEqual(len(self.artifacts.recent()), 1)
+        self.assertEqual(self.artifacts.recent()[0]["kind"], "failed")
+
+    def test_save_failure_is_distinguishable_from_no_output(self):
+        self._record("Research McIntire", "not saved: 403 Forbidden")
+        self.assertIn("403", self.artifacts.recent()[0]["action"])
+
+
 if __name__ == "__main__":
     unittest.main()

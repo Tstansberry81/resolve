@@ -30,10 +30,13 @@ from .policy import PolicyDecision, evaluate_tool_call
 
 log = logging.getLogger("resolve.executor")
 
-# Planner stays on Sonnet so multi-step plans don't fall apart; the executor
-# runs on Haiku for cost. All overridable via env — flip back if quality dips.
+# Both on Sonnet. The executor ran on Haiku for cost and it did not hold up: the
+# narrate-instead-of-deliver stalls, the "let me compile this" tails, and the
+# truncated-mid-tool-call turns all came from the cheap tier failing at plain
+# research. A step that costs less but doesn't happen isn't cheaper. Set
+# EXECUTOR_MODEL back to a haiku id if the bill ever justifies re-testing it.
 PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-sonnet-4-6")
-EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-haiku-4-5-20251001")
+EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-sonnet-4-6")
 # kept modest to bound per-task cost (Opus + web search adds up fast)
 MAX_STEP_TURNS = int(os.getenv("EXECUTOR_MAX_STEP_TURNS", "4"))
 # A full research writeup does not fit in 2500 output tokens. Truncation isn't
@@ -98,6 +101,12 @@ PLANNER_SYSTEM = (
     "- The laptop: run_on_laptop (files/shell/real web browsing), open_folder / open_app /"
     " open_website\n"
     "- Calendar/tasks: create_calendar_event, create_task\n"
+    "WHEN TRAV SAYS 'LOCAL' / 'LOCALLY' / 'ON MY COMPUTER' / 'ON MY MACHINE' /"
+    " 'on my laptop', he means his actual Mac — plan the step to use run_on_laptop"
+    " and have the laptop agent WRITE THE FILE on disk (his workspace folder), then"
+    " open_folder or reveal_in_finder so he can see it. Do NOT substitute"
+    " save_to_vault (that's a GitHub repo, not his machine) or a Google Doc. If he"
+    " wants it in both places, say so in the step explicitly.\n"
     "Give each step a `say`: a 2-4 word present-tense spoken cue RESOLVE says aloud"
     " as it starts that step (e.g. 'researching resources', 'writing the doc',"
     " 'checking your calendar', 'wrapping up'). Natural and friendly, no jargon.\n"
@@ -518,6 +527,13 @@ async def _run_step(item: dict[str, Any]) -> bool:
         await bus.emit("executor", "task.failed",
                        f"{title} — the executor didn't produce a result (no research/output). "
                        "Try asking again.", level="error", goal_id=goal_id)
+        # and put it in the dock, so "nothing there" is never ambiguous
+        try:
+            await anyio.to_thread.run_sync(
+                lambda: artifacts.record_failure(
+                    title, "no output produced", goal_id=goal_id))
+        except Exception:
+            pass
         return False
 
     # Make this step's output available to later steps of the same plan.
@@ -531,10 +547,17 @@ async def _run_step(item: dict[str, Any]) -> bool:
         _step_outputs.pop(stale, None)
 
     # GUARANTEE the output lands in the vault — deterministic, not up to the LLM.
-    saved_url, save_err = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome))
+    saved_url, save_err = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome, goal_id))
     if save_err:  # surface a real save failure instead of silently "succeeding"
         await bus.emit("executor", "task.note", f"⚠ Couldn't save to vault: {save_err}",
                        level="error", goal_id=goal_id)
+        # the dock must not stay silent about a file that doesn't exist
+        try:
+            await anyio.to_thread.run_sync(
+                lambda: artifacts.record_failure(title, f"not saved: {save_err}",
+                                                 goal_id=goal_id))
+        except Exception:
+            pass
 
     await _mark_task(item["task_id"], "succeeded")
     detail = outcome or None
@@ -550,7 +573,8 @@ async def _run_step(item: dict[str, Any]) -> bool:
 SAVE_NOTE_MIN = int(os.getenv("EXECUTOR_SAVE_NOTE_MIN", "80"))
 
 
-def _autosave_output(title: str, outcome: str) -> tuple[str | None, str | None]:
+def _autosave_output(title: str, outcome: str,
+                     goal_id: str | None = None) -> tuple[str | None, str | None]:
     """Persist a step's output to the vault: brief log line always, plus a full
     wiki/output note for anything substantial. Returns (url, error): url when a
     note was written, error when the GitHub write actually FAILED (so the caller
@@ -572,7 +596,8 @@ def _autosave_output(title: str, outcome: str) -> tuple[str | None, str | None]:
         vault_github.write_file(path, f"# {title}\n\n{outcome.strip()}\n",
                                 message=f"agent: save {title[:50]}")
         try:
-            artifacts.record_vault(path, action="created")  # → Artifacts dock
+            # goal_id so the dock row ties back to the mission that produced it
+            artifacts.record_vault(path, action="created", goal_id=goal_id)
         except Exception:
             pass
         return f"https://github.com/{vault_github.VAULT_REPO}/blob/main/{path}", None

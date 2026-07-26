@@ -11,6 +11,7 @@ const KIND_GLYPH: Record<Artifact["kind"], string> = {
   draft: "✉",
   audio: "♪",
   file: "▣",
+  failed: "✗",
 };
 
 // window.resolveDesktop is set by the Electron shell, where file:// links can
@@ -26,6 +27,7 @@ function ArtifactRow({ a }: { a: Artifact }) {
   const [copied, setCopied] = useState(false);
   const href = a.href;
   const isLocal = !!href && href.startsWith("file:");
+  const failed = a.kind === "failed";
   const diskPath = a.path || (href ? href.replace(/^file:\/\//, "") : "");
 
   const onClick = (e: React.MouseEvent) => {
@@ -41,7 +43,7 @@ function ArtifactRow({ a }: { a: Artifact }) {
   };
 
   return (
-    <div className="artifact">
+    <div className={failed ? "artifact artifact-failed" : "artifact"}>
       <span className="artifact-glyph">{KIND_GLYPH[a.kind]}</span>
       <div className="artifact-body">
         {href ? (

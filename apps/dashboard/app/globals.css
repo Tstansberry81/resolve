@@ -1028,6 +1028,17 @@ body::before {
 
 .artifact:hover { border-color: rgba(62, 224, 255, 0.3); }
 
+/* a step that produced nothing — visible in the dock on purpose, so an empty
+   dock means "nothing was attempted" and never "something quietly died" */
+.artifact-failed {
+  border-color: rgba(255, 92, 122, 0.32);
+  background: rgba(38, 12, 18, 0.45);
+}
+
+.artifact-failed:hover { border-color: rgba(255, 92, 122, 0.5); }
+.artifact-failed .artifact-glyph { color: var(--red, #ff5c7a); }
+.artifact-failed .artifact-meta { color: var(--red, #ff5c7a); }
+
 .artifact-glyph {
   font-size: 15px;
   color: var(--cyan);
