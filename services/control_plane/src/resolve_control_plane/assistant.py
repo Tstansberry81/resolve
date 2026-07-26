@@ -739,13 +739,21 @@ async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = N
             " RESOLVE maps each to his exact saved URL. For any other site, pass a"
             " full URL."
         )
+    # Trav's operator brief from the vault — what his shorthand refers to. Joined
+    # into the STATIC half so it's prompt-cached with SYSTEM: it changes only when
+    # he edits the note, which costs one cache miss and then bills at 0.1x. Putting
+    # it in the dynamic half instead would pay full price for it on every turn.
+    from . import guide
+    brief = guide.system_block()
+    static = f"{SYSTEM}\n\n{brief}" if brief else SYSTEM
+
     # Static SYSTEM + tools are prompt-cached (billed 0.1x after the first turn);
     # the datetime + shortcut lines are a tiny uncached block so they can't bust it.
-    system = cached_system(SYSTEM, (
+    system = cached_system(static, (
         f"Right now it is {now.strftime('%A, %B %d, %Y at %I:%M %p')} Eastern."
         " Resolve every relative date (tomorrow, Sunday, next week) from this —"
         " never guess weekdays. 'Tomorrow' always means the next calendar date,"
-        " even between midnight and dawn." + sc_hint
+        " even between midnight and dawn." + sc_hint + (" " + guide.hint_if_missing())
     ))
     messages: list[dict[str, Any]] = []
     for prior_user, prior_reply in history:

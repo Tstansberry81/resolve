@@ -95,11 +95,24 @@ def write_file(path: str, content: str, message: str = "") -> dict:
 
     Guards the CLAUDE.md schema: `raw/` is IMMUTABLE (source of truth) and
     CLAUDE.md itself is off-limits to automated writes. Everything else in
-    `wiki/` and `output/` is fair game — it's all git-versioned/reversible."""
+    `wiki/` and `output/` is fair game — it's all git-versioned/reversible.
+
+    The operator brief is protected for a sharper reason than convention: it is
+    loaded into the assistant's SYSTEM PROMPT with operator authority, so a
+    writable brief would let any prompt injection that reaches an ingested email
+    or web page permanently rewrite RESOLVE's own instructions. Only Trav edits
+    it, by hand, in Obsidian."""
+    import os
+
     norm = path.strip().lstrip("/")
     low = norm.lower()
+    guide_path = os.getenv("RESOLVE_GUIDE_PATH", "wiki/RESOLVE.md").strip().lstrip("/").lower()
     if low.startswith("raw/") or low == "raw" or low == "claude.md":
         raise ValueError(f"refusing to write to protected path: {path} (raw/ and CLAUDE.md are read-only)")
+    if low == guide_path:
+        raise ValueError(
+            f"refusing to write to {path}: the operator brief is read-only to RESOLVE. "
+            "It goes into my system prompt, so only Trav edits it — by hand, in Obsidian.")
     url = f"https://api.github.com/repos/{VAULT_REPO}/contents/{norm}"
     sha = None
     existing = requests.get(url, headers=_headers(), timeout=20)
