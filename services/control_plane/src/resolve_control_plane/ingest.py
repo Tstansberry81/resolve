@@ -225,7 +225,13 @@ async def run_daily_ingest(day_iso: str | None = None) -> dict:
                 results.append({"type": "tool_result", "tool_use_id": tu.id, "content": "ok"})
                 continue
             try:
-                out = await anyio.to_thread.run_sync(lambda: _dispatch(tu.name, dict(tu.input)))
+                # Bind the loop variable into the lambda's defaults. It happens to
+                # be safe today because the await completes before the loop
+                # advances, but a bare closure over `tu` dispatches whatever tool
+                # the loop has reached the moment this becomes concurrent.
+                # assistant.py already does it this way; this call site missed it.
+                out = await anyio.to_thread.run_sync(
+                    lambda n=tu.name, inp=dict(tu.input): _dispatch(n, inp))
                 if tu.name == "vault_write" and isinstance(out, dict) and out.get("path"):
                     written.append(out["path"])
                     await bus.emit("assistant", "vault.write", f"Wrote {out['path']}",

@@ -37,3 +37,15 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+# Pin the rule set explicitly. Without this, ruff falls back to whatever its
+# CURRENT defaults are, and CI installs the newest ruff on every run — so a ruff
+# release that widens the defaults turns CI red with no code change. That is
+# exactly what happened: `ruff check src tests` failed on every commit for weeks
+# (198 findings under 0.16, zero under the older pin) while the code was fine.
+#
+# E4/E7/E9 + F is ruff's own documented default and what this repo was passing
+# before the drift. Widening it is a deliberate decision to make on purpose, not
+# something a dependency upgrade should do silently.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
