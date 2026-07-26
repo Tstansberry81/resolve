@@ -818,7 +818,17 @@ async def _loop(goal_id: str, text: str) -> None:
                     )
             messages.append({"role": "user", "content": results})
 
-        status = "waiting_approval" if pending_actions else "completed"
+        # A handoff reply ("Queued — the planner will…") is the assistant finishing,
+        # NOT the work finishing. Marking the goal completed here made a plan that
+        # later died read as a success in the dashboard and the goal list — which
+        # is exactly how a 400-killed research plan looked "done". The executor
+        # settles it to completed/failed when its queue drains.
+        if pending_actions:
+            status = "waiting_approval"
+        elif executor.is_working():
+            status = "active"
+        else:
+            status = "completed"
         # Honest fallback: only say "Done." if a tool actually ran. Otherwise don't
         # imply success — that was the source of the "Done." hallucination.
         if not final_text:
@@ -839,7 +849,8 @@ async def _loop(goal_id: str, text: str) -> None:
                 lambda: store.update(
                     "goals", {"id": f"eq.{goal_id}"},
                     {"status": status,
-                     "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                     **({} if status == "active" else  # not done yet — no timestamp
+                        {"completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})},
                 )
             )
         except Exception:

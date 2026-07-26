@@ -36,6 +36,10 @@ PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-sonnet-4-6")
 EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-haiku-4-5-20251001")
 # kept modest to bound per-task cost (Opus + web search adds up fast)
 MAX_STEP_TURNS = int(os.getenv("EXECUTOR_MAX_STEP_TURNS", "4"))
+# A full research writeup does not fit in 2500 output tokens. Truncation isn't
+# just a short answer: a turn cut off mid-tool_use used to poison the transcript
+# and 400 the step, so the cap is real reliability surface, not only quality.
+MAX_STEP_TOKENS = int(os.getenv("EXECUTOR_MAX_STEP_TOKENS", "4000"))
 
 # Anthropic server-side web search — lets the executor research mid-step. Capped
 # low so a research task can't quietly rack up a big bill. allowed_callers pins
@@ -349,7 +353,7 @@ async def _execute_opus(item: dict[str, Any], context: str) -> str:
     for _ in range(MAX_STEP_TURNS + 3):  # headroom for search turns + a compile turn
         compact_messages(messages)  # trim stale tool_result blobs from the transcript
         resp = await client.messages.create(
-            model=EXECUTOR_MODEL, max_tokens=2500, system=system,
+            model=EXECUTOR_MODEL, max_tokens=MAX_STEP_TOKENS, system=system,
             tools=TOOLS + [WEB_SEARCH_TOOL], messages=messages,
         )
         costs.record("executor", EXECUTOR_MODEL, resp.usage)
@@ -362,30 +366,51 @@ async def _execute_opus(item: dict[str, Any], context: str) -> str:
             outcome = turn_text
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
         # pause_turn: server-side web search hit its loop cap; resend to resume.
-        if resp.stop_reason == "pause_turn":
+        # Only safe to bounce straight back when the turn carries no client tool
+        # calls — otherwise it falls through and gets answered properly below.
+        if resp.stop_reason == "pause_turn" and not tool_uses:
             messages.append({"role": "assistant", "content": resp.content})
             continue
-        if resp.stop_reason != "tool_use" or not tool_uses:
-            # The model stopped. If what it produced is a PROMISE ("I'll research…"
-            # / "let me compile this now") rather than the actual result — the #1
-            # reliability failure — force it to deliver, whether or not it searched.
-            if nudges < 3 and _needs_action(outcome):
-                nudges += 1
-                messages.append({"role": "assistant", "content": resp.content})
-                messages.append({"role": "user", "content": (
-                    "You have NOT delivered the result — you only said what you'd do. "
-                    "Write the COMPLETE answer/findings right now as your final message, "
-                    "in full, using what you already found. Do not describe your plan, "
-                    "do not say 'let me' — just output the finished content.")})
-                continue
-            break
-        messages.append({"role": "assistant", "content": resp.content})
-        results = []
-        for tu in tool_uses:
-            content, is_err = await _dispatch_tool(tu.name, dict(tu.input), goal_id)
-            results.append({"type": "tool_result", "tool_use_id": tu.id,
-                            "content": content, "is_error": is_err})
-        messages.append({"role": "user", "content": results})
+        if tool_uses:
+            # EVERY assistant turn carrying tool_use must be followed by a
+            # tool_result for each id, no matter what stop_reason says. Keying
+            # off stop_reason == "tool_use" alone meant a max_tokens truncation
+            # mid-call fell into the nudge path, which appended a plain user
+            # message after the dangling tool_use — the API rejects the next
+            # request with "tool_use ids were found without tool_result blocks"
+            # and the whole step dies. That 400 killed the McIntire plan.
+            messages.append({"role": "assistant", "content": resp.content})
+            truncated = resp.stop_reason == "max_tokens"
+            results = []
+            for tu in tool_uses:
+                if truncated:
+                    # the block was cut off, so its input JSON can't be trusted
+                    results.append({"type": "tool_result", "tool_use_id": tu.id,
+                                    "content": "Not executed — your previous turn was cut "
+                                               "off mid-call. Answer without it, or call it "
+                                               "again more briefly.",
+                                    "is_error": True})
+                    continue
+                content, is_err = await _dispatch_tool(tu.name, dict(tu.input), goal_id)
+                results.append({"type": "tool_result", "tool_use_id": tu.id,
+                                "content": content, "is_error": is_err})
+            messages.append({"role": "user", "content": results})
+            continue
+        # No tool calls — the model stopped. If what it produced is a PROMISE
+        # ("I'll research…" / "let me compile this now") rather than the actual
+        # result — the #1 reliability failure — force it to deliver.
+        if nudges < 3 and _needs_action(outcome):
+            nudges += 1
+            # an empty content list is itself a 400; keep the turn well-formed
+            messages.append({"role": "assistant",
+                             "content": resp.content or [{"type": "text", "text": "…"}]})
+            messages.append({"role": "user", "content": (
+                "You have NOT delivered the result — you only said what you'd do. "
+                "Write the COMPLETE answer/findings right now as your final message, "
+                "in full, using what you already found. Do not describe your plan, "
+                "do not say 'let me' — just output the finished content.")})
+            continue
+        break
     # If it never delivered (still a bare promise), return empty → honest failure.
     return "" if _needs_action(outcome) else outcome
 
@@ -589,6 +614,26 @@ async def stop_current() -> dict[str, Any]:
     return {"cancelledRunning": cancelled_running, "droppedSteps": dropped}
 
 
+async def _settle_goal(goal_id: str, failed: bool) -> None:
+    """Write the plan's real verdict onto the goal row once the queue drains."""
+    if not goal_id or len(goal_id) != 36:  # non-uuid ids never made it to the store
+        return
+    status = "failed" if failed else "completed"
+    try:
+        await anyio.to_thread.run_sync(
+            lambda: store.update("goals", {"id": f"eq.{goal_id}"},
+                                 {"status": status,
+                                  "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                                time.gmtime())})
+        )
+    except Exception:
+        pass
+    if failed:
+        await bus.emit("core", "goal.failed",
+                       "The plan finished with a failed step — nothing reliable was saved.",
+                       level="error", goal_id=goal_id)
+
+
 async def worker_loop() -> None:
     """Single in-process worker: one step at a time, halt flag between steps."""
     global _current_step_task
@@ -627,6 +672,10 @@ async def worker_loop() -> None:
             _current_step_task = None
         if queue.empty():
             await bus.set_orb("idle", "Sonnet standing by", [])
+            # The plan is what finishes the goal, not the assistant's "queued"
+            # reply — settle the row here so a failed plan can't sit in the
+            # dashboard reading "completed".
+            await _settle_goal(item.get("goal_id", ""), failed=any_failed)
             # spoken sign-off once the whole plan is done — honest about failures
             if completed_ok:
                 msg = "Done — though a step ran into trouble." if any_failed else "All wrapped up."
