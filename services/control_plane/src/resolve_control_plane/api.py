@@ -168,6 +168,10 @@ async def snapshot() -> dict:
         "pendingApprovals": len(pending_actions),
         "taskQueue": queue_status(),
         "costs": costs.snapshot(),
+        # what each role ACTUALLY runs. The dashboard roster used to hardcode
+        # model names, so the constellation kept saying Haiku long after the
+        # code moved off it — serve the truth instead of duplicating it.
+        "models": executor.model_roster(),
         "localExec": executor.local_exec,
         "localAvailable": local_llm.configured(),
         "localWorker": local.online(),

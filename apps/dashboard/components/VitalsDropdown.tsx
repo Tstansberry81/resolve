@@ -7,7 +7,7 @@ import { AGENTS } from "@/lib/roster";
 // Top-left status pill; click to expand full system + per-agent detail.
 
 export function VitalsDropdown() {
-  const { vitals, activeNodes, emergencyStopped } = useEngine();
+  const { vitals, activeNodes, emergencyStopped, modelsByRole } = useEngine();
   const [open, setOpen] = useState(false);
 
   const degraded =
@@ -68,7 +68,7 @@ export function VitalsDropdown() {
                 <div key={ag.id} className="agent-row" data-busy={busy}>
                   <span className="agent-dot" style={{ background: busy ? ag.color : undefined }} />
                   <span className="agent-name">{ag.label}</span>
-                  <span className="agent-model">{ag.model}</span>
+                  <span className="agent-model">{modelsByRole[ag.id] ?? ag.model}</span>
                   <span className="agent-state">
                     {emergencyStopped ? "stopped" : busy ? "busy" : "idle"}
                   </span>

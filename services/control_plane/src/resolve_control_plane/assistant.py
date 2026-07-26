@@ -30,7 +30,11 @@ from .msgutil import cached_system, compact_messages
 
 log = logging.getLogger("resolve.assistant")
 
-ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-haiku-4-5-20251001")
+# Opus 5 per Trav. NOTE the silent default that comes with it: thinking is ON by
+# default on Opus 5 (unlike 4.8/4.7, where omitting the field meant no thinking),
+# and max_tokens caps thinking + reply TOGETHER — so a tight max_tokens now
+# truncates mid-answer. Every max_tokens in this repo was re-checked for that.
+ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-opus-5")
 MAX_TURNS = 8
 
 # what to tell Trav to run when his laptop worker is offline
@@ -485,7 +489,7 @@ async def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
         # a background plan is still running — don't stomp its "executing" orb
         await bus.set_orb("executing", "Working on your plan", ["executor"])
     else:
-        await bus.set_orb("idle", "Sonnet standing by", [])
+        await bus.set_orb("idle", f"{executor.model_label(ASSISTANT_MODEL)} standing by", [])
     return outcome
 
 
@@ -626,7 +630,7 @@ async def _loop(goal_id: str, text: str) -> None:
     # goal.accepted is emitted in run_command (so it shows immediately, even when
     # queued). Here we just flip the orb busy as this task actually starts.
     client = anthropic.AsyncAnthropic()
-    await bus.set_orb("thinking", "Sonnet is working your request", ["assistant"])
+    await bus.set_orb("thinking", f"{executor.model_label(ASSISTANT_MODEL)} is working your request", ["assistant"])
 
     now = datetime.now(ZoneInfo("America/New_York"))
     from . import sites
@@ -864,7 +868,7 @@ async def _loop(goal_id: str, text: str) -> None:
             # to idle when the queue drains.
             await bus.set_orb("executing", "Executor is working your plan", ["executor"])
         else:
-            await bus.set_orb("idle", "Sonnet standing by", [])
+            await bus.set_orb("idle", f"{executor.model_label(ASSISTANT_MODEL)} standing by", [])
     except asyncio.CancelledError:
         raise  # a 'stop' — let the processor handle it, no error reply
     except Exception as exc:
@@ -875,11 +879,11 @@ async def _loop(goal_id: str, text: str) -> None:
         await bus.emit("assistant", "assistant.reply",
                        "Something went wrong on my end and I couldn't finish that — try again?",
                        detail=f"error: {exc}", level="error", goal_id=goal_id)
-        await bus.set_orb("idle", "Sonnet standing by", [])
+        await bus.set_orb("idle", f"{executor.model_label(ASSISTANT_MODEL)} standing by", [])
         try:
             await anyio.to_thread.run_sync(
                 lambda: store.update("goals", {"id": f"eq.{goal_id}"}, {"status": "failed"})
             )
         except Exception:
             pass
-        await bus.set_orb("idle", "Sonnet standing by", [])
+        await bus.set_orb("idle", f"{executor.model_label(ASSISTANT_MODEL)} standing by", [])

@@ -34,6 +34,7 @@ interface CostSnapshot {
 }
 
 function vitalsFrom(
+  models: Record<string, string>,
   connectors: ConnectorHealth[],
   orb: string,
   pending: number,
@@ -46,7 +47,7 @@ function vitalsFrom(
     connectors: ALL_CONNECTORS.map((c) => byId.get(c.id) ?? c),
     models: AGENTS.map((a) => ({
       role: a.id,
-      model: a.model,
+      model: models[a.id] ?? a.model,
       p50Ms: 0,
       costTodayUsd: costByRole.get(a.id)?.costTodayUsd ?? 0,
     })),
@@ -69,12 +70,13 @@ export const OFFLINE_STATE: EngineState = {
   events: [],
   approvals: [],
   artifacts: [],
-  vitals: vitalsFrom([], "idle", 0),
+  vitals: vitalsFrom({}, [], "idle", 0),
   activeNodes: [],
   activeEdge: null,
   emergencyStopped: false,
   localExec: false,
   localAvailable: false,
+  modelsByRole: {},
   morningBrief: null,
 };
 
@@ -125,8 +127,9 @@ export class LiveEngine {
         approvals: s.approvals ?? [],
         events: (s.events ?? []).slice().reverse(),
         artifacts: s.artifacts ?? [],
-        vitals: vitalsFrom(s.connectors ?? [], s.orb, s.pendingApprovals ?? 0, s.costs,
-          Boolean(s.localWorker)),
+        vitals: vitalsFrom(s.models ?? {}, s.connectors ?? [], s.orb,
+          s.pendingApprovals ?? 0, s.costs, Boolean(s.localWorker)),
+        modelsByRole: s.models ?? {},
         localExec: Boolean(s.localExec),
         localAvailable: Boolean(s.localAvailable),
         morningBrief: s.morningBrief ?? null,

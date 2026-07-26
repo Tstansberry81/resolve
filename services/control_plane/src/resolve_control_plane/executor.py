@@ -30,19 +30,21 @@ from .policy import PolicyDecision, evaluate_tool_call
 
 log = logging.getLogger("resolve.executor")
 
-# Both on Sonnet. The executor ran on Haiku for cost and it did not hold up: the
-# narrate-instead-of-deliver stalls, the "let me compile this" tails, and the
-# truncated-mid-tool-call turns all came from the cheap tier failing at plain
-# research. A step that costs less but doesn't happen isn't cheaper. Set
-# EXECUTOR_MODEL back to a haiku id if the bill ever justifies re-testing it.
-PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-sonnet-4-6")
-EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-sonnet-4-6")
+# Planner on Opus 5 (per Trav), executor on Sonnet 5. The executor ran on Haiku
+# for cost and it did not hold up: the narrate-instead-of-deliver stalls, the
+# "let me compile this" tails, and the truncated-mid-tool-call turn that 400'd
+# the McIntire plan all came from the cheap tier failing at plain research. A
+# step that costs less but doesn't happen isn't cheaper.
+PLANNER_MODEL = os.getenv("PLANNER_MODEL", "claude-opus-5")
+EXECUTOR_MODEL = os.getenv("EXECUTOR_MODEL", "claude-sonnet-5")
 # kept modest to bound per-task cost (Opus + web search adds up fast)
 MAX_STEP_TURNS = int(os.getenv("EXECUTOR_MAX_STEP_TURNS", "4"))
 # A full research writeup does not fit in 2500 output tokens. Truncation isn't
 # just a short answer: a turn cut off mid-tool_use used to poison the transcript
 # and 400 the step, so the cap is real reliability surface, not only quality.
-MAX_STEP_TOKENS = int(os.getenv("EXECUTOR_MAX_STEP_TOKENS", "4000"))
+# Raised again for Sonnet 5, where adaptive thinking is on by default and shares
+# this budget with the answer — the old ceiling is now thinking + text.
+MAX_STEP_TOKENS = int(os.getenv("EXECUTOR_MAX_STEP_TOKENS", "8000"))
 
 # Anthropic server-side web search — lets the executor research mid-step. Capped
 # low so a research task can't quietly rack up a big bill. allowed_callers pins
@@ -157,14 +159,39 @@ PLAN_TOOL = {
 }
 
 
+def model_label(model_id: str) -> str:
+    """Friendly name for a model id ('claude-opus-5' → 'Opus 5'), so every caption
+    reports the model that ACTUALLY runs. Captions used to be hardcoded — the UI
+    said Sonnet/Opus while the code ran Haiku, which is how a whole tier swap went
+    unnoticed. Derive the label, never type it."""
+    m = (model_id or "").lower()
+    for family in ("opus", "sonnet", "haiku", "fable"):
+        if family in m:
+            # trailing version: claude-opus-5 → "5", claude-sonnet-4-6 → "4.6".
+            # Stop at the first long run of digits — that's a dated snapshot
+            # (claude-haiku-4-5-20251001), not another version segment.
+            tail = m.split(family, 1)[1].strip("-")
+            parts: list[str] = []
+            for p in tail.split("-"):
+                if not p.isdigit() or len(p) > 2:
+                    break
+                parts.append(p)
+            return f"{family.capitalize()} {'.'.join(parts)}".strip()
+    return model_id or "model"
+
+
+# Public roster of what each role actually runs — the dashboard reads this via
+# /v1/snapshot instead of hardcoding model names in the frontend roster.
+def model_roster() -> dict[str, str]:
+    from .assistant import ASSISTANT_MODEL
+
+    return {"assistant": ASSISTANT_MODEL, "planner": PLANNER_MODEL,
+            "executor": "local Qwen" if local_exec else EXECUTOR_MODEL}
+
+
 def _cloud_label() -> str:
-    """Friendly name for the current cloud executor model, so the UI reports the
-    model that ACTUALLY ran (this was hardcoded 'Opus' while the default is Haiku)."""
-    m = EXECUTOR_MODEL.lower()
-    for key in ("opus", "sonnet", "haiku"):
-        if key in m:
-            return key.capitalize()
-    return EXECUTOR_MODEL
+    """Friendly name for the current cloud executor model."""
+    return model_label(EXECUTOR_MODEL)
 
 
 def available() -> bool:
@@ -194,11 +221,15 @@ async def plan_project(goal_id: str, objective: str) -> dict[str, Any]:
     """Sonnet's plan_project tool body: the Planner (Opus) plans, steps queue."""
     await bus.emit("assistant", "handoff.planner", f"Sonnet → Planner: {objective[:110]}",
                    edge={"from": "assistant", "to": "planner"}, goal_id=goal_id)
-    await bus.set_orb("thinking", "Planner (Opus) is designing the plan", ["assistant", "planner"])
+    await bus.set_orb("thinking", f"Planner ({model_label(PLANNER_MODEL)}) is designing the plan",
+                      ["assistant", "planner"])
 
     client = anthropic.AsyncAnthropic()
     resp = await client.messages.create(
-        model=PLANNER_MODEL, max_tokens=1500, system=cached_system(PLANNER_SYSTEM),
+        # 1500 was sized for a no-thinking model. Opus 5 thinks by default and
+        # max_tokens covers thinking + the submit_plan call, so a tight cap here
+        # truncates the plan mid-tool_use — the exact shape that killed a step.
+        model=PLANNER_MODEL, max_tokens=4000, system=cached_system(PLANNER_SYSTEM),
         tools=[PLAN_TOOL], tool_choice={"type": "tool", "name": "submit_plan"},
         messages=[{"role": "user", "content": objective}],
     )
@@ -696,7 +727,7 @@ async def worker_loop() -> None:
         finally:
             _current_step_task = None
         if queue.empty():
-            await bus.set_orb("idle", "Sonnet standing by", [])
+            await bus.set_orb("idle", "Standing by", [])
             # The plan is what finishes the goal, not the assistant's "queued"
             # reply — settle the row here so a failed plan can't sit in the
             # dashboard reading "completed".

@@ -237,5 +237,5 @@ async def run_daily_ingest(day_iso: str | None = None) -> dict:
     await bus.emit("assistant", "vault.ingest",
                    f"Daily ingest {day_iso} complete — {len(written)} page(s) written",
                    detail=result_summary[:600] or None, level="success")
-    await bus.set_orb("idle", "Sonnet standing by", [])
+    await bus.set_orb("idle", "Standing by", [])
     return {"day": day_iso, "pages": written, "summary": result_summary}

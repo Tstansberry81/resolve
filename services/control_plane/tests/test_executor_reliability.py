@@ -145,6 +145,36 @@ class AutosaveTest(unittest.TestCase):
         self.assertIsNone(err)
 
 
+class ModelLabelTest(unittest.TestCase):
+    """Captions and the dashboard roster derive labels from the configured model
+    id. They used to be hardcoded, which is how the UI kept saying Haiku long
+    after the backend moved off it."""
+
+    def test_labels_match_configured_ids(self):
+        cases = {
+            "claude-opus-5": "Opus 5",
+            "claude-sonnet-5": "Sonnet 5",
+            "claude-sonnet-4-6": "Sonnet 4.6",
+            "claude-haiku-4-5-20251001": "Haiku 4.5",  # dated snapshot, not 4.5.20251001
+            "claude-fable-5": "Fable 5",
+        }
+        for model_id, expected in cases.items():
+            self.assertEqual(executor.model_label(model_id), expected, model_id)
+
+    def test_unknown_id_falls_back_to_the_id(self):
+        self.assertEqual(executor.model_label("qwen2.5:32b"), "qwen2.5:32b")
+        self.assertEqual(executor.model_label(""), "model")
+
+    def test_roster_reports_every_role(self):
+        roster = executor.model_roster()
+        self.assertEqual(set(roster), {"assistant", "planner", "executor"})
+        self.assertTrue(all(roster.values()))
+
+    def test_roster_reports_local_when_the_toggle_is_on(self):
+        with mock.patch.object(executor, "local_exec", True):
+            self.assertEqual(executor.model_roster()["executor"], "local Qwen")
+
+
 class FailureArtifactTest(unittest.TestCase):
     """The Artifacts dock is the source of truth for what got done, so a step
     that produced nothing has to leave a row — otherwise a dead step and a step

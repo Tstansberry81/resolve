@@ -19,7 +19,7 @@ _recent: list[dict[str, Any]] = []
 MAX_RECENT = 80
 
 # orb state lives here so snapshot and SSE agree
-orb: dict[str, str] = {"state": "idle", "caption": "Sonnet standing by"}
+orb: dict[str, str] = {"state": "idle", "caption": "Standing by"}
 active_nodes: list[str] = []
 
 # event types worth pinging Telegram about, with a display prefix

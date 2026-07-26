@@ -144,6 +144,9 @@ export interface EngineState {
   localExec: boolean;
   /** a local model is configured (LOCAL_MODEL_URL set) */
   localAvailable: boolean;
+  /** what each agent role ACTUALLY runs, from the control plane. The roster in
+   *  lib/roster.ts only supplies a fallback — never hardcode a model name. */
+  modelsByRole: Record<string, string>;
   /** today's finished morning brief — spoken once on the first armed wake */
   morningBrief: { date: string; text: string } | null;
 }

@@ -178,7 +178,9 @@ export function Constellation() {
 
       for (const ag of AGENTS) {
         if (ag.id === "assistant") continue; // the orb IS the assistant, at the center
-        drawNode(ag.id, ag.label, ag.model, "agent");
+        // live model from the snapshot; roster value is only a fallback
+        const model = engine.getSnapshot().modelsByRole[ag.id] ?? ag.model;
+        drawNode(ag.id, ag.label, model, "agent");
       }
       CONNECTORS.forEach((c) => drawNode(c.id, c.label, null, "connector"));
 
