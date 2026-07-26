@@ -86,7 +86,8 @@ def gather_materials(day_iso: str) -> str:
     _et = ZoneInfo("America/New_York")
     start = datetime.datetime.fromisoformat(day_iso).replace(tzinfo=_et)
     end = start + datetime.timedelta(days=1)
-    fmt = lambda d: d.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def fmt(d):
+        return d.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     rng = f"(created_at.gte.{fmt(start)},created_at.lt.{fmt(end)})"
     lines: list[str] = []
     failed = False

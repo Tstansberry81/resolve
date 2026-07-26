@@ -280,7 +280,8 @@ def summary(days: int = 30, refresh: bool = False) -> dict[str, Any]:
     series = [{"date": ds, "value": merged[ds]} for ds in sorted(merged)]
 
     txns_out.sort(key=lambda x: x["date"], reverse=True)
-    acct_out = lambda a: ({"name": a["name"], "balance": round(a["balance"], 2)} if a else None)
+    def acct_out(a):
+        return {"name": a["name"], "balance": round(a["balance"], 2)} if a else None
 
     return {
         "days": days,

@@ -7,7 +7,6 @@ import datetime
 import email
 import imaplib
 import os
-import re
 import smtplib
 from email.header import decode_header
 from email.mime.text import MIMEText
