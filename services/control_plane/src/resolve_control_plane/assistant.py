@@ -280,18 +280,13 @@ def _save_to_vault(title: str, content: str, category: str = "output") -> dict[s
     return {"saved": True, "path": path, "url": url, "title": title}
 
 
-def _log_task_summary(request: str, reply: str) -> None:
-    """Always-on: drop a BRIEF one-liner for every task into the vault log so
-    nothing goes untracked (the full artifact save is separate/case-by-case)."""
-    if not vault_github.configured():
-        return
-    r = " ".join((reply or "").split())[:280]
-    q = " ".join((request or "").split())[:200]
-    try:
-        vault_github.append_log(f"agent · {q[:60]}",
-                                [f"- **Asked:** {q}", f"- **Result:** {r or '(done)'}"])
-    except Exception:
-        pass  # logging must never break the reply
+# NOTE: the always-on per-reply vault log is gone on purpose. It wrote one
+# GitHub commit for EVERY prompt, which is what bloated the log and kept
+# wedging the Obsidian sync. Nothing is lost: the day's activity is
+# reconstructed from Supabase (goals + agent_events) by ingest.gather_materials
+# and written up once by the daily ingest — that summary, not a per-prompt
+# transcript, is the record. The vault_log TOOL still exists for when the
+# assistant judges something worth logging.
 
 
 def _log_gdrive_artifact(res: dict[str, Any], action: str = "created") -> None:
@@ -850,11 +845,6 @@ async def _loop(goal_id: str, text: str) -> None:
             "assistant", "assistant.reply", final_text[:160],
             detail=final_text or None, level="success", goal_id=goal_id,
         )
-        # always log a brief summary of the task to the vault (best-effort)
-        try:
-            await anyio.to_thread.run_sync(lambda: _log_task_summary(text, final_text))
-        except Exception:
-            pass
         try:
             await anyio.to_thread.run_sync(
                 lambda: store.update(

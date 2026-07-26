@@ -54,7 +54,7 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "path": {"type": "string"}, "content": {"type": "string"}, "message": {"type": "string"}},
          "required": ["path", "content"]}},
-    {"name": "vault_append_log", "description": "Append a dated entry to wiki/log.md.",
+    {"name": "vault_append_log", "description": "Append an entry to today's vault log (wiki/logs/<date>.md).",
      "input_schema": {"type": "object", "properties": {
          "title": {"type": "string"}, "lines": {"type": "array", "items": {"type": "string"}}},
          "required": ["title", "lines"]}},

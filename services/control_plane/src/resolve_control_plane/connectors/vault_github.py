@@ -1,6 +1,12 @@
-"""Vault (second brain) — appends entries to wiki/log.md in the vault repo via
-the GitHub contents API, the same write path the vault1 bot uses. The Mac's
-Obsidian pulls these down."""
+"""Vault (second brain) — writes into the vault repo via the GitHub contents
+API. The Mac's Obsidian clone pulls these down.
+
+Logs go to a DATED file (wiki/logs/YYYY-MM-DD.md), not one shared wiki/log.md.
+A single append-target had two independent writers — RESOLVE through this API
+and Obsidian on disk — so every run dirtied the same file, obsidian-git refused
+to pull over the dirty tree, and the vault wedged (13 behind / 4 ahead when we
+finally looked). Per-day files mean the two sides almost never touch the same
+file, and a stale local copy of an OLD day can't block today's pull."""
 
 from __future__ import annotations
 
@@ -11,7 +17,12 @@ import os
 import requests
 
 VAULT_REPO = os.getenv("GITHUB_VAULT_REPO", "Tstansberry81/vault")
-LOG_PATH = "wiki/log.md"
+LOG_PATH = "wiki/log.md"   # legacy single log: kept for its history, no longer written
+LOG_DIR = "wiki/logs"      # today's entries land in LOG_DIR/<date>.md
+
+
+def log_path_for(day: str | None = None) -> str:
+    return f"{LOG_DIR}/{day or dt.date.today().isoformat()}.md"
 
 
 def configured() -> bool:
@@ -26,34 +37,38 @@ def _headers() -> dict[str, str]:
 
 
 def append_log(title: str, lines: list[str]) -> dict:
-    """Append a dated entry to wiki/log.md (read → append → PUT with sha)."""
-    url = f"https://api.github.com/repos/{VAULT_REPO}/contents/{LOG_PATH}"
-    r = requests.get(url, headers=_headers(), timeout=15)
-    r.raise_for_status()
-    meta = r.json()
-    content = base64.b64decode(meta["content"]).decode("utf-8")
-
+    """Append an entry to TODAY's log file, creating it on the first write of
+    the day (read → append → PUT with sha; PUT without sha when it's new)."""
     today = dt.date.today().isoformat()
-    entry = f"\n## [{today}] agent | {title}\n" + "\n".join(f"- {line}" for line in lines) + "\n"
-    new_content = content.rstrip("\n") + "\n" + entry
+    path = log_path_for(today)
+    url = f"https://api.github.com/repos/{VAULT_REPO}/contents/{path}"
 
-    put = requests.put(
-        url,
-        headers=_headers(),
-        json={
-            "message": f"agent: log {title}",
-            "content": base64.b64encode(new_content.encode("utf-8")).decode("ascii"),
-            "sha": meta["sha"],
-        },
-        timeout=15,
-    )
+    r = requests.get(url, headers=_headers(), timeout=15)
+    if r.status_code == 404:
+        content, sha = f"# RESOLVE log — {today}\n", None
+    else:
+        r.raise_for_status()
+        meta = r.json()
+        content = base64.b64decode(meta["content"]).decode("utf-8")
+        sha = meta["sha"]
+
+    entry = f"\n## {title}\n" + "\n".join(f"- {line}" for line in lines) + "\n"
+    payload = {
+        "message": f"agent: log {title[:60]}",
+        "content": base64.b64encode(
+            (content.rstrip("\n") + "\n" + entry).encode("utf-8")).decode("ascii"),
+    }
+    if sha:  # omitted on create — GitHub rejects a sha for a file that doesn't exist
+        payload["sha"] = sha
+
+    put = requests.put(url, headers=_headers(), json=payload, timeout=15)
     put.raise_for_status()
     try:
         from .. import artifacts
-        artifacts.record_vault(LOG_PATH, action="updated")
+        artifacts.record_vault(path, action="updated" if sha else "created")
     except Exception:
         pass
-    return {"committed": True, "path": LOG_PATH, "title": title}
+    return {"committed": True, "path": path, "title": title}
 
 
 def read_file(path: str, limit: int = 6000) -> dict:

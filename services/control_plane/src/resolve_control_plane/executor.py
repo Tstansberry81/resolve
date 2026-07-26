@@ -682,11 +682,8 @@ def _vault_save(title: str, outcome: str,
         return None, None
     if not vault_github.configured():
         return None, "vault not configured (GITHUB_TOKEN missing)"
-    brief = " ".join(outcome.split())[:200]
-    try:
-        vault_github.append_log(f"executor · {title[:60]}", [f"- {brief}"])
-    except Exception:
-        pass  # the log line is nice-to-have; the note below is the real save
+    # No per-step log line: it was a commit per step on a shared file, and the
+    # full note written below is the actual record.
     if len(outcome.strip()) < SAVE_NOTE_MIN:
         return None, None  # genuinely tiny (a number, a yes/no) — log line suffices
     slug = (re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60]) or "research"
