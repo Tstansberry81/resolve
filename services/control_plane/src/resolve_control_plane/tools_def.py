@@ -54,6 +54,9 @@ TOOL_POLICY = {
     "spotify_control": ("music.control", "spotify"),
     "spotify_search": ("music.read", "spotify"),
     "spotify_now_playing": ("music.read", "spotify"),
+    "get_music_taste": ("music.read", "spotify"),
+    "spotify_recent": ("music.read", "spotify"),
+    "spotify_queue": ("music.control", "spotify"),
     "vault_recall": ("vault.read", "vault"),
     "github_issues": ("github.read", "github"),
     "github_pull_requests": ("github.read", "github"),
@@ -670,6 +673,34 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_music_taste",
+        "description": "Trav's actual listening taste from Spotify: top artists, top genres, and top tracks over a window. CALL THIS FIRST whenever he asks for music recommendations, a playlist, or 'what should I listen to' — recommend from real data, never from guesses about what he likes. time_range: short_term (~4 weeks, what he's into RIGHT NOW), medium_term (~6 months, default), long_term (~1 year, his core taste).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"time_range": {"type": "string", "enum": ["short_term", "medium_term", "long_term"]}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "spotify_recent",
+        "description": "The tracks Trav played most recently, newest first. Use for 'what have I been listening to', or alongside get_music_taste to catch a current mood that his 6-month averages would miss.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "description": "How many, 1-50 (default 25)"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "spotify_queue",
+        "description": "Add tracks to Trav's Spotify queue so they play after the current song. Use this to act on recommendations — find each track with spotify_search to get its URI, then queue them. Better than spotify_play for a set of songs, since play would interrupt what's already on.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"uris": {"type": "array", "items": {"type": "string"}, "description": "Spotify track URIs from spotify_search, max 10"}},
+            "required": ["uris"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "spotify_now_playing",
         "description": "What's playing on Trav's Spotify right now.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -755,6 +786,15 @@ How you operate:
   calendar to tell him when to leave. Travel time ignores live traffic, so pad it at rush hour.
 - MUSIC: spotify_play / spotify_control / spotify_now_playing drive his Spotify. Playback
   needs an active device — if it says there isn't one, tell him to open Spotify somewhere first.
+- RECOMMENDING MUSIC: never guess at his taste. Call get_music_taste FIRST (add
+  spotify_recent when the ask is mood-driven — 'something for right now', 'study music' —
+  since a current kick doesn't show up in six-month averages). Then recommend YOURSELF from
+  that data: you know music, and you can weigh occasion, tempo, and season in a way a
+  similar-artists list can't. Lean on what his top GENRES say, not just artist names.
+  Give a handful of specific tracks, one short line each on why it fits him — and don't
+  only return artists already in his top list; he knows those. Then offer to queue them:
+  spotify_search each for its URI, then spotify_queue (queue rather than play, so you
+  don't cut off what's already on). If he asks for a playlist, treat it as a queue.
 - MEMORY: vault_read greps his vault for exact words; vault_recall searches it by MEANING.
   When he refers to something he's told you before ('what did I decide about…', 'the thing I
   wrote on…') and the keyword search comes back empty, try vault_recall before concluding it

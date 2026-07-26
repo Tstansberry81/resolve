@@ -324,15 +324,106 @@ def _spotify(slug: str, args: dict | None = None) -> dict:
 
 def _spotify_hint(msg: str) -> str:
     low = msg.lower()
+    # Scope errors first: a 403 from a history call means the connection was
+    # authorized without user-top-read / user-read-recently-played, and no amount
+    # of retrying fixes it. Reconnecting in Composio does.
+    if "scope" in low or "insufficient" in low:
+        return (
+            "Spotify won't share that without extra permissions. Reconnect Spotify in "
+            "Composio and grant user-top-read, user-read-recently-played, and "
+            "user-library-read — then ask me again.")
     if "no active device" in low or "404" in low:
         return ("No active Spotify device — open Spotify on your phone, Mac, or a "
                 "speaker and play something for a second, then ask me again.")
     if "premium" in low or "403" in low:
-        return "Spotify says that needs Premium on the account RESOLVE is connected to."
+        return ("Spotify refused that. Either it needs Premium, or the connection is "
+                "missing a permission — for listening history, reconnect Spotify in "
+                "Composio with user-top-read and user-read-recently-played.")
     if "account" in low and "select" in low:
         return ("Two Spotify accounts are connected, so I can't tell which to use — "
                 "set COMPOSIO_ACCOUNTS with a \"spotify\" entry to pin one.")
     return msg
+
+
+def _tracks(items: list, key: str | None = None) -> list[dict]:
+    """Flatten Spotify track objects down to what a recommendation actually needs.
+
+    Full track objects are enormous (available_markets alone is ~180 country
+    codes per track). Sending 50 of them raw would cost thousands of tokens to
+    say what four fields say.
+    """
+    out = []
+    for it in items or []:
+        track = (it.get(key) if key else it) or {}
+        if not isinstance(track, dict) or not track.get("name"):
+            continue
+        out.append({
+            "name": track.get("name"),
+            "artist": ", ".join(a.get("name", "") for a in (track.get("artists") or [])
+                                if isinstance(a, dict)),
+            "uri": track.get("uri"),
+        })
+    return out
+
+
+def spotify_recent(limit: int = 25) -> dict:
+    data = _spotify("SPOTIFY_GET_RECENTLY_PLAYED_TRACKS",
+                    {"limit": max(1, min(limit, 50))})
+    return {"recentlyPlayed": _tracks(data.get("items") or [], key="track")}
+
+
+def spotify_taste(time_range: str = "medium_term") -> dict:
+    """A compact picture of what Trav actually listens to.
+
+    Deliberately NOT Spotify's /recommendations endpoint: Spotify closed that to
+    new apps in late 2024, along with audio-features and related-artists. So the
+    recommending happens in the assistant instead, which is the better outcome
+    anyway — it can weigh mood, occasion and season, explain WHY a track fits,
+    and suggest things outside the algorithmic bubble Spotify would return.
+
+    Genres come from top ARTISTS rather than tracks because Spotify only tags
+    genre at the artist level; it's the strongest single signal for taste.
+    """
+    if time_range not in ("short_term", "medium_term", "long_term"):
+        time_range = "medium_term"
+
+    artists = _spotify("SPOTIFY_GET_USER_S_TOP_ARTISTS",
+                       {"limit": 20, "time_range": time_range})
+    tracks = _spotify("SPOTIFY_GET_USER_S_TOP_TRACKS",
+                      {"limit": 25, "time_range": time_range})
+
+    top_artists, genres = [], {}
+    for a in (artists.get("items") or []):
+        if not isinstance(a, dict) or not a.get("name"):
+            continue
+        top_artists.append(a["name"])
+        for g in (a.get("genres") or []):
+            genres[g] = genres.get(g, 0) + 1
+
+    window = {"short_term": "the last ~4 weeks",
+              "medium_term": "the last ~6 months",
+              "long_term": "the last ~year"}[time_range]
+
+    return {
+        "window": window,
+        "topArtists": top_artists,
+        # Ranked by how many of his top artists carry the genre - a far better
+        # summary of taste than any single artist name.
+        "topGenres": [g for g, _ in sorted(genres.items(), key=lambda kv: -kv[1])][:12],
+        "topTracks": _tracks(tracks.get("items") or []),
+    }
+
+
+def spotify_queue(uris: list[str]) -> dict:
+    """Queue tracks behind whatever is playing. Recommending is only useful if he
+    can act on it without a second round trip."""
+    queued = []
+    for uri in (uris or [])[:10]:
+        if ":track:" not in str(uri):
+            continue
+        _spotify("SPOTIFY_ADD_ITEM_TO_PLAYBACK_QUEUE", {"uri": uri})
+        queued.append(uri)
+    return {"queued": len(queued), "uris": queued}
 
 
 def spotify_search(query: str, kind: str = "track", limit: int = 5) -> dict:

@@ -196,3 +196,60 @@ def test_draft_reply_omits_subject_to_stay_in_thread(monkeypatch):
 
     composio.create_gmail_draft("a@b.com", "Fresh", "body")
     assert seen["args"]["subject"] == "Fresh"
+
+
+# --- Spotify taste (listening history) --------------------------------------
+
+def test_taste_summarises_genres_across_top_artists(monkeypatch):
+    """Genre is only tagged at the ARTIST level on Spotify, and it's the single
+    best taste signal - so it has to be aggregated, not read off tracks."""
+    def fake(slug, args=None):
+        if "ARTISTS" in slug:
+            return {"items": [
+                {"name": "Feid", "genres": ["reggaeton", "urbano latino"]},
+                {"name": "Bad Bunny", "genres": ["reggaeton", "trap latino"]},
+                {"name": "Drake", "genres": ["rap"]},
+            ]}
+        return {"items": [
+            {"name": "Luna", "uri": "spotify:track:1", "artists": [{"name": "Feid"}]},
+        ]}
+
+    monkeypatch.setattr(composio, "_spotify", fake)
+    out = composio.spotify_taste("short_term")
+    assert out["topGenres"][0] == "reggaeton"      # most common wins
+    assert out["topArtists"][:2] == ["Feid", "Bad Bunny"]
+    assert out["topTracks"][0]["artist"] == "Feid"
+    assert "4 weeks" in out["window"]
+
+
+def test_taste_defaults_a_bad_window(monkeypatch):
+    monkeypatch.setattr(composio, "_spotify", lambda slug, args=None: {"items": []})
+    assert "6 months" in composio.spotify_taste("nonsense")["window"]
+
+
+def test_tracks_are_stripped_to_what_a_recommendation_needs():
+    """A raw Spotify track carries ~180 market codes; 50 of them would cost
+    thousands of tokens to say what three fields say."""
+    raw = [{"track": {"name": "X", "uri": "spotify:track:9",
+                      "artists": [{"name": "A"}, {"name": "B"}],
+                      "available_markets": ["US"] * 180,
+                      "album": {"images": [{"url": "..."}]}}}]
+    out = composio._tracks(raw, key="track")
+    assert out == [{"name": "X", "artist": "A, B", "uri": "spotify:track:9"}]
+
+
+def test_queue_ignores_non_track_uris(monkeypatch):
+    """Queueing an album URI silently no-ops on Spotify's side."""
+    seen = []
+    monkeypatch.setattr(composio, "_spotify",
+                        lambda slug, args=None: seen.append(args) or {})
+    out = composio.spotify_queue(["spotify:track:1", "spotify:album:2", "spotify:track:3"])
+    assert out["queued"] == 2
+    assert len(seen) == 2
+
+
+def test_missing_scope_tells_him_to_reconnect_not_retry():
+    """A 403 from a history call is a permissions problem no retry can fix."""
+    msg = composio._spotify_hint("Composio X failed: 403 insufficient scope")
+    assert "Reconnect Spotify" in msg
+    assert "user-top-read" in msg

@@ -285,6 +285,12 @@ def _connector_call(name: str, args: dict[str, Any],
         return composio.spotify_search(str(args["query"]), str(args.get("kind") or "track"))
     if name == "spotify_now_playing":
         return composio.spotify_now_playing()
+    if name == "get_music_taste":
+        return composio.spotify_taste(str(args.get("time_range") or "medium_term"))
+    if name == "spotify_recent":
+        return composio.spotify_recent(int(args.get("limit", 25)))
+    if name == "spotify_queue":
+        return composio.spotify_queue(list(args.get("uris") or []))
     if name == "vault_recall":
         from . import vault_index
         return vault_index.search(str(args["query"]))
