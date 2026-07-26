@@ -461,9 +461,34 @@ def local_next() -> dict:
     return local.next_task() or {}
 
 
+@app.post("/v1/local/ping", dependencies=[Depends(auth)])
+def local_ping() -> dict:
+    """Heartbeat the worker sends WHILE a task runs. Its poll loop blocks during
+    a task, so without this a busy laptop reported offline after 30s — and the
+    executor's local-save path gates on that liveness check."""
+    local.touch()
+    return {"ok": True}
+
+
 @app.post("/v1/local/result", dependencies=[Depends(auth)])
-def local_result(body: ResultBody) -> dict:
-    local.set_result(body.taskId, body.summary)
+async def local_result(body: ResultBody) -> dict:
+    goal_id = local.set_result(body.taskId, body.summary)
+    failed = body.summary.strip().upper().startswith(("SAVE FAILED", "FAILED", "NO OUTPUT"))
+    if failed:
+        # the dock is the source of truth for what got done; a local task that
+        # produced nothing used to leave NO row at all, which read as success
+        await bus.emit("local", "local.failed", body.summary.split("\n")[0][:160],
+                       detail=body.summary, level="error", goal_id=goal_id or None)
+        try:
+            await anyio.to_thread.run_sync(
+                lambda: artifacts.record_failure(
+                    "Laptop task", body.summary.split("\n")[0][:120], goal_id=goal_id))
+        except Exception:
+            pass
+    if goal_id:
+        # the laptop finishing is what finishes the goal — the assistant's
+        # "dispatched" reply is not completion, and used to be recorded as such
+        await executor._settle_goal(goal_id, failed=failed)
     return {"ok": True}
 
 
@@ -471,6 +496,7 @@ def local_result(body: ResultBody) -> dict:
 async def local_event(body: EventBody) -> dict:
     # Worker progress pulses the REAL delegation edge (assistant → laptop) so
     # the constellation shows the actual handoff, not a made-up executor→web hop.
+    local.touch()
     await bus.emit("local", "local.event", body.summary, detail=body.detail,
                    edge={"from": "assistant", "to": "local"}, goal_id=body.taskId or None)
     return {"ok": True}
@@ -489,6 +515,8 @@ class LocalArtifactBody(BaseModel):
 async def local_artifact(body: LocalArtifactBody) -> dict:
     """The laptop worker reports a file it created/changed so it lands in the
     Artifacts dock with a clickable link that resolves on Trav's Mac."""
+    local.touch()
+
     def _rec():
         return artifacts.record(body.name, body.path, location=body.location,
                                 href=body.href or None, action=body.action,

@@ -18,12 +18,28 @@ from . import bus
 _queue: list[dict[str, Any]] = []
 _results: dict[str, str] = {}
 _approvals: dict[str, dict[str, Any]] = {}
+_inflight: dict[str, str] = {}  # taskId -> goalId for tasks the worker holds
 _last_poll: float = 0.0
 
 
+def touch() -> None:
+    """Any authenticated call FROM the worker proves it's alive. The poll loop
+    blocks while a task runs, so polling alone made a busy worker read offline
+    after 30s — which is exactly when a long local task is in flight."""
+    global _last_poll
+    _last_poll = time.time()
+
+
 def online() -> bool:
-    """A worker polled within the last 30s."""
+    """The worker made contact within the last 30s (poll, heartbeat, or result)."""
     return (time.time() - _last_poll) < 30
+
+
+def busy() -> bool:
+    """Work is queued for the laptop or currently running on it. The assistant
+    uses this so a goal it dispatched to the Mac isn't marked completed while
+    the Mac is still working on it."""
+    return bool(_queue or _inflight)
 
 
 # ── offline watchdog (ticked once a minute by the routine scheduler) ─────────
@@ -59,9 +75,9 @@ async def watchdog_tick() -> None:
         )
 
 
-def enqueue(task: str) -> dict[str, Any]:
+def enqueue(task: str, goal_id: str | None = None) -> dict[str, Any]:
     task_id = str(uuid.uuid4())
-    _queue.append({"taskId": task_id, "task": task})
+    _queue.append({"taskId": task_id, "task": task, "goalId": goal_id or ""})
     return {"taskId": task_id, "queued": True, "workerOnline": online()}
 
 
@@ -91,19 +107,30 @@ def enqueue_file_save(rel_path: str, content: str, label: str) -> dict[str, Any]
 
 
 def next_task() -> dict[str, Any] | None:
-    global _last_poll
-    _last_poll = time.time()
-    return _queue.pop(0) if _queue else None
+    touch()
+    if not _queue:
+        return None
+    job = _queue.pop(0)
+    # remember it's running so busy() stays true until the result comes back
+    _inflight[job["taskId"]] = job.get("goalId") or ""
+    return job
 
 
 _RESULTS_CAP = 200
 
 
-def set_result(task_id: str, summary: str) -> None:
+def set_result(task_id: str, summary: str) -> str | None:
+    """Record a finished local task. Returns the goal it belonged to (if any) so
+    the caller can settle that goal — without this the goal sat at whatever the
+    assistant wrote at dispatch time, which read 'completed' while the laptop
+    was still working."""
+    touch()
+    goal_id = _inflight.pop(task_id, None)
     _results[task_id] = summary
     if len(_results) > _RESULTS_CAP:  # bound memory — evict oldest insertions
         for k in list(_results)[:len(_results) - _RESULTS_CAP]:
             _results.pop(k, None)
+    return goal_id or None
 
 
 def get_result(task_id: str) -> str | None:

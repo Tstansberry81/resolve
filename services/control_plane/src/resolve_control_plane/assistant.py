@@ -97,7 +97,8 @@ def _looks_actionable(text: str) -> bool:
     """The user asked for something to be done — a tool should have run."""
     return bool(_ACTIONABLE_RE.search(text or ""))
 
-def _connector_call(name: str, args: dict[str, Any]) -> Any:
+def _connector_call(name: str, args: dict[str, Any],
+                    goal_id: str | None = None) -> Any:
     if name == "get_calendar":
         return gcal.list_events(int(args.get("days", 7)))
     if name == "create_calendar_event":
@@ -161,7 +162,9 @@ def _connector_call(name: str, args: dict[str, Any]) -> Any:
                             sensitive_only=bool(args.get("sensitive", False)))
     if name == "run_on_laptop":
         from . import local
-        return local.enqueue(str(args["task"]))
+        # goal_id rides along so the goal is settled when the LAPTOP finishes,
+        # not when we finish dispatching to it
+        return local.enqueue(str(args["task"]), goal_id=goal_id)
     if name == "open_folder":
         from . import local
         p = str(args["path"])
@@ -457,7 +460,8 @@ async def decide_approval(approval_id: str, decision: str) -> dict[str, Any]:
         node = TOOL_POLICY[action["tool"]][1]
         try:
             result = await anyio.to_thread.run_sync(
-                lambda: _connector_call(action["tool"], action["args"])
+                lambda: _connector_call(action["tool"], action["args"],
+                                        action.get("goal_id"))
             )
             await bus.emit(
                 node, f"{action['tool']}.executed", f"Approved and executed — {action['summary']}",
@@ -798,7 +802,7 @@ async def _loop(goal_id: str, text: str) -> None:
                 started = time.monotonic()
                 try:
                     result = await anyio.to_thread.run_sync(
-                        lambda n=tu.name, inp=dict(tu.input): _connector_call(n, inp)
+                        lambda n=tu.name, inp=dict(tu.input): _connector_call(n, inp, goal_id)
                     )
                     ms = int((time.monotonic() - started) * 1000)
                     await bus.emit(
@@ -827,9 +831,12 @@ async def _loop(goal_id: str, text: str) -> None:
         # later died read as a success in the dashboard and the goal list — which
         # is exactly how a 400-killed research plan looked "done". The executor
         # settles it to completed/failed when its queue drains.
+        from . import local as _local
         if pending_actions:
             status = "waiting_approval"
-        elif executor.is_working():
+        elif executor.is_working() or _local.busy():
+            # a plan on the queue OR work dispatched to the laptop — either way
+            # the assistant replying is not the work finishing
             status = "active"
         else:
             status = "completed"
@@ -860,13 +867,20 @@ async def _loop(goal_id: str, text: str) -> None:
         except Exception:
             pass
         if pending_actions:
-            await bus.set_orb("waiting", "Sonnet is waiting on your approval", ["assistant"])
-        elif executor.is_working():
-            # The assistant handed off to a background plan and replied "queued" —
-            # don't stomp the orb to idle. Keep it executing with the executor lit
-            # so the constellation shows real work; the executor loop settles it
-            # to idle when the queue drains.
-            await bus.set_orb("executing", "Executor is working your plan", ["executor"])
+            await bus.set_orb(
+                "waiting",
+                f"{executor.model_label(ASSISTANT_MODEL)} is waiting on your approval",
+                ["assistant"])
+        elif executor.is_working() or _local.busy():
+            # Handed off and replied "queued" — don't stomp the orb to idle. Light
+            # the node that's ACTUALLY working so the constellation isn't lying:
+            # laptop work used to show as the cloud executor.
+            if executor.is_working():
+                await bus.set_orb("executing", "Executor is working your plan",
+                                  ["executor"])
+            else:
+                await bus.set_orb("executing", "Your laptop is working on it",
+                                  ["local"])
         else:
             await bus.set_orb("idle", f"{executor.model_label(ASSISTANT_MODEL)} standing by", [])
     except asyncio.CancelledError:

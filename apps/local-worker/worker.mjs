@@ -19,7 +19,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { exec, execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SELF_DIR = path.dirname(fileURLToPath(import.meta.url)); // apps/local-worker (inside the repo)
 
@@ -36,6 +36,40 @@ const VAULT = path.resolve(
   process.env.VAULT_PATH || path.join(os.homedir(), "Desktop", "Obsidian Vault"),
 );
 const MAX_TURNS = 40;
+// Files written during the CURRENT task. The laptop agent likes to end a turn
+// saying "let me write the file" without calling write_file — so "it said it
+// saved" has to be checkable against something real.
+let filesWritten = 0;
+
+// ── delivery guard (port of executor._needs_action) ─────────────────────────
+// The laptop loop had none of this: it broke out of the loop on any turn with
+// no tool call, so a promise became the reported summary and the task was
+// logged complete. Same narrate-and-quit failure the cloud executor had.
+const INTENT_RE =
+  /^\s*(?:(?:sure|okay|ok|alright|great|perfect|got it)[,!.\s]+)?(?:i'?ll|i will|i'?m going to|i am going to|let me|first,?\s+i(?:'?ll| will)?|i'?d be happy to|i'?m about to)\s+(?:research|find|search|look|check|compile|summar\w*|write|draft|create|put together|gather|locate|prepare|organize|provide|give|pull|read|do|answer|get|start|dig|explore|review)/i;
+const PROMISE_TAIL_RE =
+  /(let me|i'?ll|i will|now i'?ll|i'?m going to|we'?re going to|i need to|i should|first i)\s+(compile|summar|write|put together|create|draft|save|provide|give|lay out|organize|prepare|check|look|locate|find|gather|review|search|pull|read|start)\S*[^.!?]*[.!?:]?\s*$/i;
+const PROMISE_MARKER_RE =
+  /\b(let me|i'?ll|i will|i'?m going to|i am going to|i need to|i should)\b/gi;
+const DELIVERED_MIN = 600;
+const TAIL_WINDOW = 200;
+
+function needsAction(text) {
+  const t = String(text || "").trim();
+  if (!t) return true;
+  if (t.length < 240 && INTENT_RE.test(t)) return true;
+  const tail = t.slice(-TAIL_WINDOW);
+  const m = tail.match(PROMISE_TAIL_RE);
+  if (!m) return false;
+  // a finished writeup that merely signs off with a promise is real output
+  const body = t.slice(0, Math.max(0, t.length - TAIL_WINDOW) + m.index).trim();
+  if (body.length < DELIVERED_MIN) return true;
+  return (body.match(PROMISE_MARKER_RE) || []).length >= 3;
+}
+
+// promised a FILE specifically — checkable against filesWritten
+const PROMISED_FILE_RE =
+  /\b(write|writing|create|creating|save|saving|compile|compiling|put together)\b[^.!?]{0,80}\b(file|markdown|\.md|document|writeup|write-up|note|report)\b/i;
 let vaultManual = ""; // loaded once from VAULT/CLAUDE.md
 
 const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY
@@ -226,6 +260,7 @@ async function runTool(taskId, name, args) {
     const existed = await fs.access(p).then(() => true).catch(() => false);
     await fs.mkdir(path.dirname(p), { recursive: true });
     await fs.writeFile(p, String(args.content ?? ""), "utf8");
+    filesWritten += 1;
     await emit(taskId, `wrote ${args.path}`);
     await artifact(taskId, p, "local", existed ? "updated" : "created");
     return `wrote ${args.path}`;
@@ -260,6 +295,7 @@ async function runTool(taskId, name, args) {
     const existed = await fs.access(p).then(() => true).catch(() => false);
     await fs.mkdir(path.dirname(p), { recursive: true });
     await fs.writeFile(p, String(args.content ?? ""), "utf8");
+    filesWritten += 1;
     await emit(taskId, `vault: wrote ${args.path}`);
     await artifact(taskId, p, "vault", existed ? "updated" : "created");
     return `wrote ${args.path}`;
@@ -393,35 +429,86 @@ async function runTask(taskId, task) {
   }
   const messages = [{ role: "user", content: String(task) }];
   let summary = "";
-  for (let i = 0; i < MAX_TURNS; i++) {
-    const resp = await anthropic.messages.create({ model: MODEL, max_tokens: 2000, system, tools: TOOLS, messages });
-    const texts = resp.content.filter((b) => b.type === "text").map((b) => b.text);
-    if (texts.length) summary = texts[texts.length - 1];
-    const toolUses = resp.content.filter((b) => b.type === "tool_use");
-    if (resp.stop_reason !== "tool_use" || !toolUses.length) break;
-    messages.push({ role: "assistant", content: resp.content });
-    const results = [];
-    let done = false;
-    for (const tu of toolUses) {
-      if (tu.name === "finish") {
-        summary = tu.input?.summary || summary;
-        done = true;
-        results.push({ type: "tool_result", tool_use_id: tu.id, content: "ok" });
+  let nudges = 0;
+  const writesBefore = filesWritten;
+  // The poll loop is blocked for the whole task, so heartbeat or the cloud
+  // marks this worker offline after 30s — and gates local saves on that.
+  const beat = setInterval(() => {
+    cp("/v1/local/ping", { method: "POST" }).catch(() => {});
+  }, 10_000);
+  try {
+    for (let i = 0; i < MAX_TURNS; i++) {
+      const resp = await anthropic.messages.create({ model: MODEL, max_tokens: 2000, system, tools: TOOLS, messages });
+      const texts = resp.content
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .filter((t) => t && t.trim());
+      // join ALL text blocks — taking only the last one dropped the body
+      const turnText = texts.join("\n").trim();
+      if (turnText) summary = turnText;
+      const toolUses = resp.content.filter((b) => b.type === "tool_use");
+
+      if (toolUses.length) {
+        messages.push({ role: "assistant", content: resp.content });
+        const results = [];
+        let done = false;
+        const truncated = resp.stop_reason === "max_tokens";
+        for (const tu of toolUses) {
+          if (truncated) {
+            // a call cut off mid-emit has unreliable input — answer it, don't run it
+            results.push({ type: "tool_result", tool_use_id: tu.id, is_error: true,
+              content: "Not executed — your previous turn was cut off mid-call. Retry it or answer without it." });
+            continue;
+          }
+          if (tu.name === "finish") {
+            summary = tu.input?.summary || summary;
+            done = true;
+            results.push({ type: "tool_result", tool_use_id: tu.id, content: "ok" });
+            continue;
+          }
+          try {
+            const out = await runTool(taskId, tu.name, tu.input || {});
+            results.push({ type: "tool_result", tool_use_id: tu.id, content: String(out).slice(0, 12000) });
+          } catch (e) {
+            results.push({ type: "tool_result", tool_use_id: tu.id, content: `Error: ${e.message}`, is_error: true });
+          }
+        }
+        messages.push({ role: "user", content: results });
+        if (done) break;
         continue;
       }
-      try {
-        const out = await runTool(taskId, tu.name, tu.input || {});
-        results.push({ type: "tool_result", tool_use_id: tu.id, content: String(out).slice(0, 12000) });
-      } catch (e) {
-        results.push({ type: "tool_result", tool_use_id: tu.id, content: `Error: ${e.message}`, is_error: true });
+
+      // No tool call. If it only PROMISED to act ("let me compile...", "let me
+      // create the writeup now:") make it deliver instead of ending the task.
+      if (nudges < 3 && needsAction(summary)) {
+        nudges += 1;
+        messages.push({ role: "assistant", content: resp.content.length ? resp.content : [{ type: "text", text: "…" }] });
+        messages.push({ role: "user", content:
+          "You have NOT delivered. You described what you were about to do instead of doing it. " +
+          "If the task needs a file, call write_file NOW with the full content. Otherwise output the " +
+          "complete result as your final message. Do not say 'let me' — act." });
+        continue;
       }
+      break;
     }
-    messages.push({ role: "user", content: results });
-    if (done) break;
+  } finally {
+    clearInterval(beat);
   }
-  await cp("/v1/local/result", { method: "POST", body: JSON.stringify({ taskId, summary }) });
-  await emit(taskId, `Local task complete`, summary);
-  return summary;
+
+  // HONESTY: report what actually happened, so the cloud can't log a task that
+  // produced nothing as complete (it did exactly that, and the dock stayed silent).
+  const wrote = filesWritten - writesBefore;
+  let failure = null;
+  if (needsAction(summary)) {
+    failure = "NO OUTPUT: the agent described the work but never delivered it.";
+  } else if (wrote === 0 && PROMISED_FILE_RE.test(summary)) {
+    failure = "NO OUTPUT: a file was promised but none was written to disk.";
+  }
+  const reported = failure ? `${failure}\n\n${summary}`.trim() : summary;
+  await cp("/v1/local/result", { method: "POST", body: JSON.stringify({ taskId, summary: reported }) })
+    .catch(() => {});
+  await emit(taskId, failure ? `Local task FAILED — nothing produced` : `Local task complete`, reported);
+  return reported;
 }
 
 // ── vault content grep (structured action — no LLM, instant, $0) ────────────
@@ -614,7 +701,13 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Exported so the delivery guard can be tested without starting the poll loop.
+export { needsAction, PROMISED_FILE_RE };
+
+// Only run the worker when executed directly (not when imported by a test).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
