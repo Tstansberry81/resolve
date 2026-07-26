@@ -555,6 +555,31 @@ async function main() {
             body: JSON.stringify({ taskId: job.taskId,
               summary: JSON.stringify({ matches }).slice(0, 8000) }),
           }).catch(() => {});
+        } else if (job.action && job.action.kind === "save_file") {
+          // Deterministic write of a plan's output onto the Mac — no LLM in the
+          // path, so "saved" can't be a claim the model made up. Still sandboxed
+          // to the workspace by safePath().
+          console.log(`> save_file ${job.taskId}: ${String(job.action.value).slice(0, 80)}`);
+          let summary;
+          try {
+            const p = safePath(job.action.value);
+            await fs.mkdir(path.dirname(p), { recursive: true });
+            const existed = await fs
+              .access(p)
+              .then(() => true)
+              .catch(() => false);
+            await fs.writeFile(p, String(job.action.content ?? ""), "utf8");
+            await artifact(job.taskId, p, "local", existed ? "updated" : "created");
+            summary = `Saved ${p}`;
+          } catch (e) {
+            // report the failure rather than letting the cloud assume success
+            summary = `SAVE FAILED: ${String(e.message || e).slice(0, 200)}`;
+            console.error("save_file failed", e);
+          }
+          await cp("/v1/local/result", {
+            method: "POST",
+            body: JSON.stringify({ taskId: job.taskId, summary }),
+          }).catch(() => {});
         } else if (job.action && job.action.kind === "restart") {
           // cloud-pushed restart: confirm, then exit — launchd relaunches with fresh code
           console.log(`> restart requested by the control plane (${job.taskId})`);

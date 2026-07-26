@@ -578,9 +578,10 @@ async def _run_step(item: dict[str, Any]) -> bool:
         _step_outputs.pop(stale, None)
 
     # GUARANTEE the output lands in the vault — deterministic, not up to the LLM.
-    saved_url, save_err = await anyio.to_thread.run_sync(lambda: _autosave_output(title, outcome, goal_id))
+    saved_url, save_err = await anyio.to_thread.run_sync(
+        lambda: _autosave_output(title, outcome, goal_id, item.get('objective', '')))
     if save_err:  # surface a real save failure instead of silently "succeeding"
-        await bus.emit("executor", "task.note", f"⚠ Couldn't save to vault: {save_err}",
+        await bus.emit("executor", "task.note", f"⚠ Couldn't save the output: {save_err}",
                        level="error", goal_id=goal_id)
         # the dock must not stay silent about a file that doesn't exist
         try:
@@ -593,7 +594,8 @@ async def _run_step(item: dict[str, Any]) -> bool:
     await _mark_task(item["task_id"], "succeeded")
     detail = outcome or None
     if saved_url:
-        detail = f"{outcome}\n\nSaved to vault: {saved_url}"
+        where = "your Mac" if saved_url.startswith("~") else "vault"
+        detail = f"{outcome}\n\nSaved to {where}: {saved_url}"
     await bus.emit("executor", "task.completed", f"Done ({backend}): {title} — {outcome[:120]}",
                    detail=detail, level="success", goal_id=goal_id)
     return True
@@ -604,12 +606,78 @@ async def _run_step(item: dict[str, Any]) -> bool:
 SAVE_NOTE_MIN = int(os.getenv("EXECUTOR_SAVE_NOTE_MIN", "80"))
 
 
-def _autosave_output(title: str, outcome: str,
-                     goal_id: str | None = None) -> tuple[str | None, str | None]:
-    """Persist a step's output to the vault: brief log line always, plus a full
-    wiki/output note for anything substantial. Returns (url, error): url when a
-    note was written, error when the GitHub write actually FAILED (so the caller
-    can surface it instead of a silent success)."""
+# "local" as a DESTINATION, not as a topic. "research local coffee shops" must
+# not route the save to the laptop, so a bare "local" only counts next to a
+# save/file word; "on my computer" and friends are unambiguous on their own.
+_LOCAL_DEST_RE = re.compile(
+    r"\b(?:(?:on|to|onto|in) my (?:computer|laptop|mac|machine|desktop)"
+    r"|local(?:ly)?[ -]?(?:based|hosted|file|copy|folder|disk|drive)"
+    r"|(?:save|store|put|write|keep|download|page|doc|note|file)\w*\s+"
+    r"(?:\w+\s+){0,3}?local(?:ly)?\b"
+    r"|local(?:ly)?\s+(?:\w+\s+){0,3}?(?:save|store|file|folder|disk|drive))\b",
+    re.IGNORECASE)
+
+
+def _wants_local(objective: str) -> bool:
+    """True when Trav asked for the output ON HIS MACHINE. He said 'locally
+    based' and got a GitHub vault page — the guaranteed save ignored the goal
+    text entirely, so fixing only the planner left this half broken."""
+    return bool(_LOCAL_DEST_RE.search(objective or ""))
+
+
+def _save_local(title: str, outcome: str, goal_id: str | None) -> tuple[str | None, str | None]:
+    """Hand the write to the laptop worker. Returns (path, error)."""
+    from . import local
+
+    if not local.online():
+        return None, "laptop worker offline — nothing written to your Mac"
+    slug = (re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60]) or "research"
+    rel = f"{slug}.md"
+    try:
+        local.enqueue_file_save(rel, f"# {title}\n\n{outcome.strip()}\n",
+                                f"Save {rel} to the workspace")
+    except Exception as exc:
+        return None, str(exc)[:160]
+    # The worker records the artifact once the bytes are on disk — that row, not
+    # this return, is the proof it landed.
+    return rel, None
+
+
+def _autosave_output(title: str, outcome: str, goal_id: str | None = None,
+                     objective: str = "") -> tuple[str | None, str | None]:
+    """Persist a step's output. When the goal asked for it locally, the file goes
+    to the Mac (via the laptop worker) and the vault becomes a best-effort
+    archive; otherwise the vault is the target. Returns (url_or_path, error) —
+    error only when NOTHING was written, so the caller never reports a save that
+    didn't happen."""
+    if not (outcome or "").strip():
+        return None, None
+
+    if _wants_local(objective) and len(outcome.strip()) >= SAVE_NOTE_MIN:
+        rel, local_err = _save_local(title, outcome, goal_id)
+        if rel:
+            # also archive to the vault, but never let its failure (e.g. an
+            # expired GITHUB_TOKEN) mask a successful local save
+            try:
+                _vault_save(title, outcome, goal_id)
+            except Exception:
+                pass
+            return f"~/resolve-workspace/{rel}", None
+        # laptop unreachable — fall through to the vault so the work survives
+        vault_url, vault_err = _vault_save(title, outcome, goal_id)
+        if vault_url:
+            return vault_url, None
+        return None, f"{local_err}; vault fallback also failed: {vault_err}"
+
+    return _vault_save(title, outcome, goal_id)
+
+
+def _vault_save(title: str, outcome: str,
+                goal_id: str | None = None) -> tuple[str | None, str | None]:
+    """Brief log line always, plus a full wiki/output note for anything
+    substantial. Returns (url, error): url when a note was written, error when
+    the GitHub write actually FAILED (so the caller can surface it instead of a
+    silent success)."""
     if not (outcome or "").strip():
         return None, None
     if not vault_github.configured():

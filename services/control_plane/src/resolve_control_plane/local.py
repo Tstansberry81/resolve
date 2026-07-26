@@ -75,6 +75,21 @@ def enqueue_action(kind: str, value: str, label: str) -> dict[str, Any]:
             "dispatched": label if online() else None}
 
 
+def enqueue_file_save(rel_path: str, content: str, label: str) -> dict[str, Any]:
+    """Enqueue a deterministic file write into the worker's workspace.
+
+    Separate from enqueue() on purpose: this must NOT go through the laptop's
+    LLM agent. The executor's autosave is guaranteed-and-deterministic by
+    design, and handing "write this file" to a model reintroduces exactly the
+    it-said-it-saved-but-didn't failure the autosave exists to prevent.
+    """
+    task_id = str(uuid.uuid4())
+    _queue.append({"taskId": task_id, "task": label,
+                   "action": {"kind": "save_file", "value": rel_path,
+                              "content": content}})
+    return {"taskId": task_id, "queued": True, "workerOnline": online()}
+
+
 def next_task() -> dict[str, Any] | None:
     global _last_poll
     _last_poll = time.time()

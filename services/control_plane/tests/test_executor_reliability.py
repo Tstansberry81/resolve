@@ -145,6 +145,89 @@ class AutosaveTest(unittest.TestCase):
         self.assertIsNone(err)
 
 
+class LocalDestinationTest(unittest.TestCase):
+    """'locally' means Trav's Mac. Fixing only the planner left this half done:
+    the executor's guaranteed autosave still wrote to the GitHub vault, so a
+    'locally based' request produced a vault page (and then a 401)."""
+
+    def test_destination_phrasings_route_local(self):
+        for goal in [
+            "add a page in my vault about the pathway, locally based.",
+            "write it on my computer",
+            "put the summary on my laptop",
+            "save the writeup locally",
+            "keep a local copy of the research",
+            "download it to my mac",
+        ]:
+            self.assertTrue(executor._wants_local(goal), goal)
+
+    def test_local_as_a_TOPIC_does_not_route_local(self):
+        # the dangerous false positive: these are research subjects, not
+        # destinations — routing them to the laptop would be wrong
+        for goal in [
+            "research local coffee shops near grounds",
+            "summarize local news for charlottesville",
+            "find local internship opportunities",
+            "compare locally sourced grocery options",
+        ]:
+            self.assertFalse(executor._wants_local(goal), goal)
+
+    def test_no_local_intent_by_default(self):
+        self.assertFalse(executor._wants_local(
+            "research uva mcintire admissions and write it up"))
+        self.assertFalse(executor._wants_local(""))
+
+    def test_local_save_needs_a_live_worker(self):
+        from resolve_control_plane import local
+        with mock.patch.object(local, "online", return_value=False):
+            path, err = executor._save_local("T", "x" * 200, None)
+        self.assertIsNone(path)
+        self.assertIn("offline", err)
+
+    def test_local_save_enqueues_a_deterministic_write(self):
+        from resolve_control_plane import local
+        with mock.patch.object(local, "online", return_value=True), \
+             mock.patch.object(local, "enqueue_file_save") as enq:
+            path, err = executor._save_local("McIntire Pathway", "x" * 200, "g1")
+        self.assertIsNone(err)
+        self.assertEqual(path, "mcintire-pathway.md")
+        enq.assert_called_once()
+        self.assertIn("McIntire Pathway", enq.call_args[0][1])  # content, not a prompt
+
+    def test_vault_failure_does_not_mask_a_good_local_save(self):
+        # the exact shape of the 401: local write fine, GitHub token dead
+        from resolve_control_plane import local
+        with mock.patch.object(local, "online", return_value=True), \
+             mock.patch.object(local, "enqueue_file_save"), \
+             mock.patch.object(executor, "_vault_save",
+                               side_effect=RuntimeError("401 Unauthorized")):
+            saved, err = executor._autosave_output(
+                "Pathway", "x" * 200, "g1", "write it up locally")
+        self.assertIsNone(err)
+        self.assertTrue(saved.startswith("~/resolve-workspace/"))
+
+    def test_falls_back_to_vault_when_the_laptop_is_offline(self):
+        from resolve_control_plane import local
+        with mock.patch.object(local, "online", return_value=False), \
+             mock.patch.object(executor, "_vault_save",
+                               return_value=("https://github.com/x/y", None)):
+            saved, err = executor._autosave_output(
+                "Pathway", "x" * 200, "g1", "write it up locally")
+        self.assertIsNone(err)
+        self.assertIn("github.com", saved)
+
+    def test_reports_failure_only_when_both_targets_fail(self):
+        from resolve_control_plane import local
+        with mock.patch.object(local, "online", return_value=False), \
+             mock.patch.object(executor, "_vault_save",
+                               return_value=(None, "401 Unauthorized")):
+            saved, err = executor._autosave_output(
+                "Pathway", "x" * 200, "g1", "write it up locally")
+        self.assertIsNone(saved)
+        self.assertIn("offline", err)
+        self.assertIn("401", err)
+
+
 class ModelLabelTest(unittest.TestCase):
     """Captions and the dashboard roster derive labels from the configured model
     id. They used to be hardcoded, which is how the UI kept saying Haiku long
