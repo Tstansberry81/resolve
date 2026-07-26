@@ -45,6 +45,15 @@ def append_log(title: str, lines: list[str]) -> dict:
 
     r = requests.get(url, headers=_headers(), timeout=15)
     if r.status_code == 404:
+        # 404 is also what a missing repo / wrong GITHUB_VAULT_REPO / unscoped
+        # token returns. Check the repo itself so a real access failure doesn't
+        # masquerade as "first write of the day" and fail confusingly on the PUT.
+        probe = requests.get(f"https://api.github.com/repos/{VAULT_REPO}",
+                             headers=_headers(), timeout=15)
+        if probe.status_code != 200:
+            raise RuntimeError(
+                f"vault repo {VAULT_REPO} unreachable ({probe.status_code}) — "
+                "check GITHUB_TOKEN scope and GITHUB_VAULT_REPO")
         content, sha = f"# RESOLVE log — {today}\n", None
     else:
         r.raise_for_status()
@@ -52,7 +61,8 @@ def append_log(title: str, lines: list[str]) -> dict:
         content = base64.b64decode(meta["content"]).decode("utf-8")
         sha = meta["sha"]
 
-    entry = f"\n## {title}\n" + "\n".join(f"- {line}" for line in lines) + "\n"
+    stamp = dt.datetime.now().strftime("%H:%M")
+    entry = f"\n## {stamp} — {title}\n" + "\n".join(f"- {line}" for line in lines) + "\n"
     payload = {
         "message": f"agent: log {title[:60]}",
         "content": base64.b64encode(

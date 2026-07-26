@@ -33,15 +33,25 @@ class DatedLogPathTest(unittest.TestCase):
 
 
 class AppendLogTest(unittest.TestCase):
-    def _put_payload(self, get_status):
-        get = mock.Mock(status_code=get_status)
-        get.json.return_value = {"content": "IyBvbGQK", "sha": "abc123"}  # "# old\n"
+    def _put_payload(self, get_status, repo_status=200):
+        """get_status is the status for the LOG FILE; repo_status is for the
+        repo-reachability probe that distinguishes 'first write today' from
+        'bad token / wrong repo' (both of which GitHub answers with 404)."""
+        file_get = mock.Mock(status_code=get_status)
+        file_get.json.return_value = {"content": "IyBvbGQK", "sha": "abc123"}  # "# old\n"
+        repo_get = mock.Mock(status_code=repo_status)
         put = mock.Mock(status_code=200)
-        with mock.patch.object(vault_github.requests, "get", return_value=get), \
+        gets = [file_get] if get_status != 404 else [file_get, repo_get]
+        with mock.patch.object(vault_github.requests, "get", side_effect=gets), \
              mock.patch.object(vault_github.requests, "put", return_value=put) as p, \
              mock.patch.dict("os.environ", {"GITHUB_TOKEN": "t"}, clear=False):
             vault_github.append_log("a title", ["line one"])
         return p.call_args.kwargs["json"], p.call_args[0][0]
+
+    def test_unreachable_repo_is_not_mistaken_for_a_new_day(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self._put_payload(404, repo_status=404)
+        self.assertIn("unreachable", str(cm.exception))
 
     def test_creates_the_file_on_the_first_write_of_the_day(self):
         payload, url = self._put_payload(404)
@@ -87,6 +97,59 @@ class DailyIngestIsTheRecordTest(unittest.TestCase):
         self.assertIn("agent_events", src)
         self.assertIn("goals", src)
         self.assertNotIn("log.md", src)
+
+
+
+class SupabaseLedgerTest(unittest.TestCase):
+    """Supabase is now the ONLY record of a day's activity, so the paths that
+    write to and read from it can't fail silently."""
+
+    def test_an_unsaved_goal_is_not_uuid_shaped(self):
+        # agent_events.goal_id references goals(id). A 36-char fallback uuid for
+        # a goal row that was never inserted passes every len(...) == 36 guard,
+        # so every event insert violates the FK and is swallowed — one transient
+        # 5xx used to erase a whole conversation from the ledger.
+        import inspect
+        src = inspect.getsource(assistant.run_command)
+        self.assertIn("unsaved-", src)
+        self.assertNotEqual(len(f"unsaved-{'x' * 36}"), 36)
+
+    def test_ingest_range_is_sent_as_utc_instants(self):
+        from resolve_control_plane import ingest
+        captured = {}
+
+        def fake_select(table, params):
+            captured[table] = params["and"]
+            return []
+
+        with mock.patch.object(ingest.store, "select", fake_select):
+            ingest.gather_materials("2026-07-26")
+        rng = captured["goals"]
+        # a bare T00:00:00 is read as UTC and buckets 8pm-midnight ET into the
+        # next day; the bounds must carry an explicit instant
+        self.assertIn("Z", rng)
+        self.assertIn("2026-07-26T04:00:00Z", rng)  # midnight ET (EDT) in UTC
+
+    def test_query_failure_is_not_reported_as_a_quiet_day(self):
+        from resolve_control_plane import ingest
+
+        def boom(table, params):
+            raise RuntimeError("supabase 503")
+
+        with mock.patch.object(ingest.store, "select", boom):
+            with self.assertRaises(RuntimeError):
+                ingest.gather_materials("2026-07-26")
+
+    def test_a_genuinely_quiet_day_still_returns_empty(self):
+        from resolve_control_plane import ingest
+        with mock.patch.object(ingest.store, "select", lambda t, p: []):
+            self.assertEqual(ingest.gather_materials("2026-07-26"), "")
+
+    def test_log_entries_carry_a_time(self):
+        # the date moved to the filename; without a stamp entries had no
+        # ordering information at all
+        import inspect
+        self.assertIn("%H:%M", inspect.getsource(vault_github.append_log))
 
 
 if __name__ == "__main__":

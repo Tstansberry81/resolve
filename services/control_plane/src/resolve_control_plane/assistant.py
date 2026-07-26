@@ -608,7 +608,13 @@ async def run_command(text: str) -> str:
         saved = await anyio.to_thread.run_sync(lambda: store.insert("goals", goal_row))
         goal_id = str(saved.get("id", uuid.uuid4()))
     except Exception:
-        goal_id = str(uuid.uuid4())
+        # The goal row does NOT exist, so a uuid here is a lie: agent_events.goal_id
+        # is `references goals(id)`, and a 36-char id passes every `len(...) == 36`
+        # guard in the codebase — so every event insert for the whole run would
+        # violate the FK and be swallowed. One transient 5xx used to erase the
+        # entire conversation from the ledger. A non-uuid-shaped id keeps the run
+        # working while those guards correctly refuse to attach it.
+        goal_id = f"unsaved-{uuid.uuid4()}"
 
     _ensure_processor()
     busy = _current_goal is not None

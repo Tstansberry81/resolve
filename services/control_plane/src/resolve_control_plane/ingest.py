@@ -80,9 +80,16 @@ def _dispatch(name: str, args: dict[str, Any]) -> Any:
 
 def gather_materials(day_iso: str) -> str:
     """Compile the day's RESOLVE activity (goals + notable events) from Supabase."""
-    nxt = (datetime.date.fromisoformat(day_iso) + datetime.timedelta(days=1)).isoformat()
-    rng = f"(created_at.gte.{day_iso}T00:00:00,created_at.lt.{nxt}T00:00:00)"
+    # day_iso is an EASTERN day, but created_at is timestamptz and a bare
+    # "T00:00:00" is read as UTC — that bucketed 8pm-midnight ET work into the
+    # NEXT day. Convert the ET day bounds to explicit UTC instants.
+    _et = ZoneInfo("America/New_York")
+    start = datetime.datetime.fromisoformat(day_iso).replace(tzinfo=_et)
+    end = start + datetime.timedelta(days=1)
+    fmt = lambda d: d.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rng = f"(created_at.gte.{fmt(start)},created_at.lt.{fmt(end)})"
     lines: list[str] = []
+    failed = False
     try:
         goals = store.select("goals", {"and": rng, "order": "created_at.asc", "limit": "100"})
         for g in goals:
@@ -90,7 +97,7 @@ def gather_materials(day_iso: str) -> str:
             if obj:
                 lines.append(f"- COMMAND: {obj}  (status: {g.get('status', '?')})")
     except Exception:
-        pass
+        failed = True
     try:
         events = store.select("agent_events", {"and": rng, "order": "created_at.asc", "limit": "300"})
         for e in events:
@@ -106,7 +113,11 @@ def gather_materials(day_iso: str) -> str:
             if text:
                 lines.append(f"- {e.get('event_type')}: {text[:400]}")
     except Exception:
-        pass
+        failed = True
+    if failed and not lines:
+        # Supabase is now the ONLY record of the day. "query failed" and "quiet
+        # day" must not look identical, or an outage silently erases a day.
+        raise RuntimeError(f"could not read the day's activity from Supabase for {day_iso}")
     return "\n".join(lines)
 
 
@@ -157,7 +168,7 @@ async def run_daily_ingest(day_iso: str | None = None) -> dict:
         "exactly: write a wiki/sources/ summary page for the day, PROPAGATE into the relevant "
         "entities/ and concepts/ pages (read them first with vault_read; update or create as "
         "needed), update wiki/overview.md if the picture shifts, refresh wiki/index.md, and append "
-        "to wiki/log.md. Obey honest calibration — do not flatter, name gaps, flag contradictions "
+        "to today's log file (use the vault_append_log tool — never write wiki/log.md directly; it is the legacy shared file whose two writers wedged the Obsidian sync). Obey honest calibration — do not flatter, name gaps, flag contradictions "
         "with a warning callout instead of overwriting, keep frontmatter + [[wikilinks]] + sources "
         "provenance on every page. NEVER write to raw/ or CLAUDE.md (the tools will refuse). Read "
         "before you write. When fully done, call finish with a summary."

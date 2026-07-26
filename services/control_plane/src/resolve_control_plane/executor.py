@@ -674,10 +674,10 @@ def _autosave_output(title: str, outcome: str, goal_id: str | None = None,
 
 def _vault_save(title: str, outcome: str,
                 goal_id: str | None = None) -> tuple[str | None, str | None]:
-    """Brief log line always, plus a full wiki/output note for anything
-    substantial. Returns (url, error): url when a note was written, error when
-    the GitHub write actually FAILED (so the caller can surface it instead of a
-    silent success)."""
+    """Write a full wiki/output note for anything substantial. Returns
+    (url, error): url when a note was written, error when the GitHub write
+    actually FAILED (so the caller can surface it instead of a silent success).
+    There is no longer a per-step log line — Supabase is the ledger."""
     if not (outcome or "").strip():
         return None, None
     if not vault_github.configured():
@@ -685,7 +685,9 @@ def _vault_save(title: str, outcome: str,
     # No per-step log line: it was a commit per step on a shared file, and the
     # full note written below is the actual record.
     if len(outcome.strip()) < SAVE_NOTE_MIN:
-        return None, None  # genuinely tiny (a number, a yes/no) — log line suffices
+        # genuinely tiny (a number, a yes/no): not worth a vault page. It is
+        # still in the Supabase event ledger and the daily summary.
+        return None, None
     slug = (re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60]) or "research"
     path = f"wiki/output/{slug}.md"
     try:
