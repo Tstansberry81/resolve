@@ -73,6 +73,15 @@
     "notion.page.archive": {
       "risk": "destructive"
     },
+    "notion.read": {
+      "risk": "read"
+    },
+    "notion.page.update": {
+      "risk": "reversible_write"
+    },
+    "notion.database.create": {
+      "risk": "reversible_write"
+    },
     "github.branch.create": {
       "risk": "reversible_write"
     },

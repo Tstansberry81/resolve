@@ -152,6 +152,86 @@ def notion_tasks() -> list:
              "priority": "High"}]
 
 
+# --- Notion (raw API shapes, for the generic workspace tools) ---------------
+# These are the real nested payloads, not pre-flattened, so the connector's own
+# property coercion and flattening are what's under test.
+
+def notion_rich(text: str) -> list:
+    return [{"type": "text", "plain_text": text, "text": {"content": text}}]
+
+
+def notion_search_results() -> dict:
+    return {"results": [
+        {"object": "database", "id": "db-classes", "url": "https://notion.so/db-classes",
+         "title": notion_rich("Classes"), "parent": {"type": "workspace"},
+         "last_edited_time": "2026-07-25T10:00:00.000Z"},
+        {"object": "page", "id": "page-fall", "url": "https://notion.so/page-fall",
+         "parent": {"type": "workspace"}, "last_edited_time": "2026-07-24T10:00:00.000Z",
+         "properties": {"Name": {"type": "title", "title": notion_rich("Fall 2026")}}},
+    ]}
+
+
+def notion_database() -> dict:
+    """A Classes database — the case that started this: not the Tasks inbox."""
+    return {
+        "object": "database", "id": "db-classes", "url": "https://notion.so/db-classes",
+        "title": notion_rich("Classes"),
+        "properties": {
+            "Name": {"type": "title", "title": {}},
+            "Days": {"type": "multi_select", "multi_select": {"options": [
+                {"name": "Mon"}, {"name": "Tue"}, {"name": "Wed"},
+                {"name": "Thu"}, {"name": "Fri"}]}},
+            "Term": {"type": "select", "select": {"options": [
+                {"name": "Fall 2026"}, {"name": "Spring 2027"}]}},
+            "Credits": {"type": "number", "number": {}},
+            "Starts": {"type": "date", "date": {}},
+            "Room": {"type": "rich_text", "rich_text": {}},
+            "Done": {"type": "checkbox", "checkbox": {}},
+            "Load": {"type": "formula", "formula": {}},  # computed: must be skipped
+        },
+    }
+
+
+def notion_query_results() -> dict:
+    return {"results": [{
+        "id": "row-calc", "url": "https://notion.so/row-calc",
+        "properties": {
+            "Name": {"type": "title", "title": notion_rich("Calculus I")},
+            "Days": {"type": "multi_select", "multi_select": [{"name": "Mon"}, {"name": "Wed"}]},
+            "Term": {"type": "select", "select": {"name": "Fall 2026"}},
+            "Credits": {"type": "number", "number": 4},
+            "Starts": {"type": "date", "date": {"start": "2026-08-25"}},
+            "Room": {"type": "rich_text", "rich_text": notion_rich("Clark 107")},
+            "Done": {"type": "checkbox", "checkbox": False},
+            "Load": {"type": "formula", "formula": {"type": "number", "number": 12}},
+            "Prof": {"type": "people", "people": [{"name": "Dr. Reid"}]},
+        },
+    }]}
+
+
+def notion_page() -> dict:
+    return {
+        "object": "page", "id": "row-calc", "url": "https://notion.so/row-calc",
+        "parent": {"type": "database_id", "database_id": "db-classes"},
+        "properties": notion_query_results()["results"][0]["properties"],
+    }
+
+
+def notion_blocks() -> dict:
+    return {"results": [
+        {"type": "heading_2", "heading_2": {"rich_text": notion_rich("Syllabus")}},
+        {"type": "bulleted_list_item",
+         "bulleted_list_item": {"rich_text": notion_rich("Midterm Oct 3")}},
+        {"type": "to_do", "to_do": {"rich_text": notion_rich("Buy textbook"), "checked": False}},
+        {"type": "paragraph", "paragraph": {"rich_text": []}},  # empty block: skipped
+    ]}
+
+
+def notion_created_page() -> dict:
+    return {"object": "page", "id": "new-page", "url": "https://notion.so/new-page",
+            "properties": {"Name": {"type": "title", "title": notion_rich("Calculus I")}}}
+
+
 def inbox_messages() -> dict:
     return {"messages": [
         {"uid": "101", "from": "prof@virginia.edu", "subject": "Office hours moved",

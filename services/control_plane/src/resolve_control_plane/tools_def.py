@@ -20,6 +20,14 @@ TOOL_POLICY = {
     "vault_read": ("vault.read", "vault"),
     "plan_project": ("plan.project", "planner"),
     "delete_task": ("notion.page.archive", "notion"),
+    "notion_search": ("notion.read", "notion"),
+    "notion_schema": ("notion.read", "notion"),
+    "notion_query": ("notion.read", "notion"),
+    "notion_read_page": ("notion.read", "notion"),
+    "notion_create_page": ("notion.page.create", "notion"),
+    "notion_update_page": ("notion.page.update", "notion"),
+    "notion_append": ("notion.page.update", "notion"),
+    "notion_create_database": ("notion.database.create", "notion"),
     "delete_calendar_event": ("calendar.delete", "calendar"),
     "ask_local": ("local.ask", "web"),
     "get_finance": ("finance.read", "finance"),
@@ -108,6 +116,113 @@ TOOLS: list[dict[str, Any]] = [
                 "notes": {"type": "string"},
             },
             "required": ["title"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notion_search",
+        "description": "Search the whole Notion workspace by title — pages AND databases. THE starting point for any Notion request that isn't the Tasks inbox: search first to get the id, then use notion_schema/notion_query/notion_create_page. If something the user names doesn't come back, it hasn't been shared with the integration — say so instead of writing it somewhere else.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Title text to match. Empty lists everything visible."},
+                "kind": {"type": "string", "enum": ["page", "database"], "description": "Restrict to one object type"},
+                "limit": {"type": "integer", "description": "Default 25, max 100"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notion_schema",
+        "description": "Read a Notion database's property names, types, and allowed select options. ALWAYS call this before the first write to a database you haven't written to this conversation — it's what makes properties land typed instead of guessed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"database_id": {"type": "string"}},
+            "required": ["database_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notion_query",
+        "description": "List rows from any Notion database, with properties flattened to plain values. Use notion_search to get the database_id.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "database_id": {"type": "string"},
+                "filter": {"type": "object", "description": "Raw Notion filter object, optional"},
+                "sorts": {"type": "array", "items": {"type": "object"}, "description": "Raw Notion sorts array, optional"},
+                "limit": {"type": "integer", "description": "Default 25, max 100"},
+            },
+            "required": ["database_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notion_read_page",
+        "description": "Read one Notion page: its properties and its body text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string"},
+                "include_content": {"type": "boolean", "description": "Include body text (default true)"},
+            },
+            "required": ["page_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notion_create_page",
+        "description": "Create a page in ANY Notion database (or under any page). Pass properties as plain values — {\"Name\": \"Calc I\", \"Days\": [\"Mon\",\"Wed\"], \"Start\": \"2026-08-25\"} — they get typed against the live schema. Call notion_schema first so the names and select options are real. Creating several rows in one database is normal: make one call per row, don't collapse them into the Tasks inbox.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "parent_id": {"type": "string", "description": "Database id, or page id when parent_is_page is true"},
+                "title": {"type": "string", "description": "Fills whichever property is the title column"},
+                "properties": {"type": "object", "description": "Property name -> plain value"},
+                "content": {"type": "string", "description": "Optional page body. Markdown headings, bullets, and - [ ] to-dos are converted."},
+                "parent_is_page": {"type": "boolean", "description": "True to nest under a page instead of a database"},
+            },
+            "required": ["parent_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notion_update_page",
+        "description": "Edit properties on an existing Notion page. Plain values, typed against the page's parent database.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string"},
+                "properties": {"type": "object", "description": "Property name -> new plain value"},
+            },
+            "required": ["page_id", "properties"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notion_append",
+        "description": "Append body content to an existing Notion page. Markdown headings, bullets, and - [ ] to-dos are converted to blocks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["page_id", "content"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notion_create_database",
+        "description": "Create a new Notion database under a page — use when the user asks for a tracker/table that doesn't exist yet. properties maps name -> type: title, rich_text, select, multi_select, date, number, checkbox, url. Requires approval.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "parent_page_id": {"type": "string", "description": "Page to nest it under (notion_search for it)"},
+                "title": {"type": "string"},
+                "properties": {"type": "object", "description": "Property name -> Notion property type"},
+            },
+            "required": ["parent_page_id", "title", "properties"],
             "additionalProperties": False,
         },
     },

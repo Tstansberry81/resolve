@@ -171,6 +171,44 @@ def _connector_call(name: str, args: dict[str, Any],
             priority=args.get("priority", "Medium"),
             notes=args.get("notes", ""),
         )
+    if name == "notion_search":
+        return notion_api.search(
+            str(args.get("query", "")),
+            kind=args.get("kind"),
+            limit=_arg_int(args, "limit", 25, 1, 100),
+        )
+    if name == "notion_schema":
+        return notion_api.get_database(str(args["database_id"]))
+    if name == "notion_query":
+        return notion_api.query_database(
+            str(args["database_id"]),
+            filter=args.get("filter"),
+            sorts=args.get("sorts"),
+            limit=_arg_int(args, "limit", 25, 1, 100),
+        )
+    if name == "notion_read_page":
+        return notion_api.get_page(
+            str(args["page_id"]),
+            include_content=args.get("include_content", True),
+        )
+    if name == "notion_create_page":
+        return notion_api.create_page(
+            str(args["parent_id"]),
+            properties=args.get("properties") or {},
+            title=args.get("title"),
+            content=str(args.get("content", "")),
+            parent_is_page=bool(args.get("parent_is_page")),
+        )
+    if name == "notion_update_page":
+        return notion_api.update_page(str(args["page_id"]), args.get("properties") or {})
+    if name == "notion_append":
+        return notion_api.append_to_page(str(args["page_id"]), str(args["content"]))
+    if name == "notion_create_database":
+        return notion_api.create_database(
+            str(args["parent_page_id"]),
+            str(args["title"]),
+            args.get("properties") or {},
+        )
     if name == "get_unread_email":
         return gmail_imap.unread_summary()
     if name == "get_inbox_recent":

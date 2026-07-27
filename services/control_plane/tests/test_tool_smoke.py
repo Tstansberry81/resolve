@@ -86,6 +86,38 @@ def _route_post(url: str, **kw) -> FakeResponse:
     return FakeResponse({})
 
 
+def _route_notion(method: str, url: str, **kw) -> FakeResponse:
+    """The generic Notion tools go through requests.request(), so they're
+    mocked here at the API boundary rather than at the connector function."""
+    if url.endswith("/search"):
+        return FakeResponse(fx.notion_search_results())
+    if "/blocks/" in url and "/children" in url:
+        if method == "GET":
+            return FakeResponse(fx.notion_blocks())
+        return FakeResponse({"results": []})  # PATCH append
+    if "/databases" in url and url.endswith("/query"):
+        return FakeResponse(fx.notion_query_results())
+    if "/databases" in url:
+        if method == "POST":  # create_database
+            return FakeResponse({**fx.notion_database(), "id": "db-new"})
+        return FakeResponse(fx.notion_database())
+    if url.endswith("/pages"):
+        return FakeResponse(fx.notion_created_page())
+    if "/pages/" in url:
+        return FakeResponse(fx.notion_page())
+    return FakeResponse({})
+
+
+def _route_request(method: str, url: str, **kw) -> FakeResponse:
+    if "api.notion.com" in url:
+        return _route_notion(method.upper(), url, **kw)
+    if method.upper() == "GET":
+        return _route_get(url, **kw)
+    if method.upper() == "POST":
+        return _route_post(url, **kw)
+    return FakeResponse({})
+
+
 @pytest.fixture(autouse=True)
 def _sandbox(monkeypatch):
     """Cut every real network path and every real side effect."""
@@ -93,6 +125,7 @@ def _sandbox(monkeypatch):
 
     monkeypatch.setattr(requests, "get", _route_get)
     monkeypatch.setattr(requests, "post", _route_post)
+    monkeypatch.setattr(requests, "request", _route_request)
     monkeypatch.setattr(requests, "put", lambda url, **kw: FakeResponse({}, 200))
     monkeypatch.setattr(requests, "patch", lambda url, **kw: FakeResponse({}, 200))
 
@@ -180,6 +213,50 @@ CASES: list[tuple[str, str, dict]] = [
     ("delete_task", "by page id", {"page_id": "page1"}),
     ("delete_task", "with title", {"page_id": "page1", "title": "Finish problem set"}),
     ("delete_task", "uuid style", {"page_id": "1f2e3d4c-5b6a-7988-9a0b-1c2d3e4f5061"}),
+    # notion — the whole workspace, not just the Tasks inbox
+    ("notion_search", "find a database by name", {"query": "Classes", "kind": "database"}),
+    ("notion_search", "bare list of everything visible", {}),
+    ("notion_search", "limit arrives as a string", {"query": "planner", "limit": "5"}),
+    ("notion_schema", "read a database's columns", {"database_id": "db-classes"}),
+    ("notion_schema", "uuid form id",
+     {"database_id": "021c8bf0-0593-48da-8f5f-dfbb2df69a4b"}),
+    ("notion_schema", "repeat call is cheap", {"database_id": "db-classes"}),
+    ("notion_query", "list rows", {"database_id": "db-classes"}),
+    ("notion_query", "with filter and sort", {"database_id": "db-classes",
+        "filter": {"property": "Term", "select": {"equals": "Fall 2026"}},
+        "sorts": [{"property": "Starts", "direction": "ascending"}]}),
+    ("notion_query", "limit as a string", {"database_id": "db-classes", "limit": "50"}),
+    ("notion_read_page", "props and body", {"page_id": "row-calc"}),
+    ("notion_read_page", "properties only", {"page_id": "row-calc", "include_content": False}),
+    ("notion_read_page", "uuid form", {"page_id": "1f2e3d4c-5b6a-7988-9a0b-1c2d3e4f5061"}),
+    ("notion_create_page", "a class row, typed from schema", {"parent_id": "db-classes",
+        "title": "Calculus I", "properties": {"Days": ["Mon", "Wed"], "Term": "Fall 2026",
+                                              "Credits": 4, "Starts": "2026-08-25"}}),
+    ("notion_create_page", "lowercase names, scalar for a multi_select, unwritable formula",
+     {"parent_id": "db-classes", "title": "Physics",
+      "properties": {"days": "Fri", "credits": "3", "Load": 12, "Nope": "x"}}),
+    ("notion_create_page", "under a page, with markdown body",
+     {"parent_id": "page-fall", "parent_is_page": True, "title": "Fall notes",
+      "content": "# Term\n- [ ] Buy books\n- Register\n\n> due soon"}),
+    ("notion_update_page", "change a select", {"page_id": "row-calc",
+                                               "properties": {"Term": "Spring 2027"}}),
+    ("notion_update_page", "checkbox and number together",
+     {"page_id": "row-calc", "properties": {"Done": True, "Credits": 5}}),
+    ("notion_update_page", "unknown property is reported, not fatal",
+     {"page_id": "row-calc", "properties": {"Ghost": "x"}}),
+    ("notion_append", "bullets", {"page_id": "row-calc", "content": "- Midterm Oct 3"}),
+    ("notion_append", "headings and to-dos", {"page_id": "row-calc",
+        "content": "## Week 1\n- [x] Syllabus\n- [ ] Problem set"}),
+    ("notion_append", "plain paragraph", {"page_id": "row-calc", "content": "Room changed."}),
+    ("notion_create_database", "a Planner db", {"parent_page_id": "page-fall",
+        "title": "Planner", "properties": {"Name": "title", "Day": "select",
+                                           "Block": "rich_text"}}),
+    ("notion_create_database", "title column implied when none given",
+     {"parent_page_id": "page-fall", "title": "Events",
+      "properties": {"When": "date", "Where": "rich_text"}}),
+    ("notion_create_database", "multi_select options start empty",
+     {"parent_page_id": "page-fall", "title": "Habits",
+      "properties": {"Name": "title", "Tags": "multi_select", "Streak": "number"}}),
     # gmail
     ("get_unread_email", "count", {}),
     ("get_unread_email", "again", {}),
