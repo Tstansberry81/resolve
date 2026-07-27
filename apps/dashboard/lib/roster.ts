@@ -68,6 +68,12 @@ export const CONNECTORS: { id: ConnectorId; label: string }[] = [
   { id: "health", label: "Health" },
   { id: "local", label: "Laptop" },
   { id: "web", label: "Web" },
+  // These three had tool activity routing to them with no node to land on, so
+  // the edge was silently dropped by the p1 && p2 guard and the constellation
+  // showed nothing while RESOLVE was genuinely working.
+  { id: "github", label: "GitHub" },
+  { id: "canvas", label: "Canvas" },
+  { id: "spotify", label: "Spotify" },
 ];
 
 /** static delegation tree drawn faintly in the constellation */

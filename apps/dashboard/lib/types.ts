@@ -18,6 +18,7 @@ export type ConnectorId =
   | "health"
   | "github"
   | "canvas"
+  | "spotify"
   | "web"
   | "google"
   | "local"
