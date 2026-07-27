@@ -74,16 +74,29 @@ def weather(place: str = "Baltimore", days: int = 3) -> dict:
     data = r.json() or {}
     cur, daily = data.get("current") or {}, data.get("daily") or {}
 
+    def at(field: str, i: int):
+        """Index a daily array safely.
+
+        Open-Meteo returns these as parallel arrays, but they are NOT guaranteed
+        to be the same length as `time` — a field unavailable for a location
+        comes back short or absent, which indexed blind is an IndexError that
+        takes out the whole forecast rather than one missing value.
+        """
+        values = daily.get(field)
+        if isinstance(values, list) and i < len(values):
+            return values[i]
+        return None
+
     out_days = []
     for i, day in enumerate(daily.get("time") or []):
         out_days.append({
             "date": day,
-            "conditions": describe_code((daily.get("weather_code") or [None])[i]),
-            "high": (daily.get("temperature_2m_max") or [None])[i],
-            "low": (daily.get("temperature_2m_min") or [None])[i],
-            "rainChance": (daily.get("precipitation_probability_max") or [None])[i],
-            "sunrise": (daily.get("sunrise") or [None])[i],
-            "sunset": (daily.get("sunset") or [None])[i],
+            "conditions": describe_code(at("weather_code", i)),
+            "high": at("temperature_2m_max", i),
+            "low": at("temperature_2m_min", i),
+            "rainChance": at("precipitation_probability_max", i),
+            "sunrise": at("sunrise", i),
+            "sunset": at("sunset", i),
         })
 
     return {

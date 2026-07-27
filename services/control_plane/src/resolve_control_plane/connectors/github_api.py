@@ -67,11 +67,15 @@ def list_issues(repo: str | None = None, state: str = "open", limit: int = 20) -
     target = _repo(repo)
     rows = _get(f"/repos/{target}/issues",
                 {"state": state, "per_page": max(1, min(limit, 50)), "sort": "updated"})
+    # .get() throughout: a partial body, a proxy-truncated response, or an error
+    # object where a list was expected must degrade to a thin row, not a KeyError
+    # that takes out the whole listing.
     issues = [{
-        "number": i["number"], "title": i["title"],
-        "state": i["state"], "url": i["html_url"],
-        "labels": [lbl.get("name") for lbl in i.get("labels", [])],
-        "updated": i.get("updated_at", "")[:10],
+        "number": i.get("number"), "title": i.get("title") or "(untitled)",
+        "state": i.get("state"), "url": i.get("html_url"),
+        "labels": [lbl.get("name") for lbl in (i.get("labels") or [])
+                   if isinstance(lbl, dict)],
+        "updated": (i.get("updated_at") or "")[:10],
     } for i in rows if isinstance(i, dict) and "pull_request" not in i]
     return {"repo": target, "state": state, "count": len(issues), "issues": issues}
 
@@ -82,10 +86,11 @@ def list_pull_requests(repo: str | None = None, state: str = "open", limit: int 
                 {"state": state, "per_page": max(1, min(limit, 50)), "sort": "updated",
                  "direction": "desc"})
     prs = [{
-        "number": p["number"], "title": p["title"], "state": p["state"],
-        "url": p["html_url"], "draft": p.get("draft", False),
+        "number": p.get("number"), "title": p.get("title") or "(untitled)",
+        "state": p.get("state"), "url": p.get("html_url"),
+        "draft": p.get("draft", False),
         "branch": (p.get("head") or {}).get("ref", ""),
-        "updated": p.get("updated_at", "")[:10],
+        "updated": (p.get("updated_at") or "")[:10],
     } for p in rows if isinstance(p, dict)]
     return {"repo": target, "state": state, "count": len(prs), "pullRequests": prs}
 
@@ -100,9 +105,14 @@ def create_issue(title: str, body: str = "", repo: str | None = None,
                       json=payload, timeout=25)
     if r.status_code not in (200, 201):
         raise RuntimeError(f"GitHub refused the issue ({r.status_code}): {r.text[:180]}")
-    data = r.json()
-    return {"created": True, "repo": target, "number": data["number"],
-            "url": data["html_url"], "title": title}
+    data = r.json() if isinstance(r.json(), dict) else {}
+    number, url = data.get("number"), data.get("html_url")
+    if not url:
+        # A 2xx without a URL means we cannot show Trav the issue. Say so rather
+        # than reporting a create he can't verify.
+        raise RuntimeError("GitHub accepted the issue but returned no link for it.")
+    return {"created": True, "repo": target, "number": number,
+            "url": url, "title": title}
 
 
 def ci_status(repo: str | None = None, limit: int = 10) -> dict:
@@ -117,12 +127,15 @@ def ci_status(repo: str | None = None, limit: int = 10) -> dict:
     runs = (data or {}).get("workflow_runs", []) if isinstance(data, dict) else []
     out = []
     for run in runs:
+        if not isinstance(run, dict):
+            continue
         conclusion = run.get("conclusion")
         out.append({
             "workflow": run.get("name"),
             "branch": run.get("head_branch"),
             "status": conclusion or ("running" if run.get("status") != "completed" else "unknown"),
-            "commit": (run.get("head_commit") or {}).get("message", "").split("\n")[0][:80],
+            # head_commit is null on workflow_dispatch runs.
+            "commit": ((run.get("head_commit") or {}).get("message") or "").split("\n")[0][:80],
             "url": run.get("html_url"),
             "when": (run.get("created_at") or "")[:16].replace("T", " "),
         })

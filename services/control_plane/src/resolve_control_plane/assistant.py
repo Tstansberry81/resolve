@@ -115,10 +115,49 @@ def _looks_actionable(text: str) -> bool:
     """The user asked for something to be done — a tool should have run."""
     return bool(_ACTIONABLE_RE.search(text or ""))
 
+def _arg_int(args: dict[str, Any], key: str, default: int,
+             lo: int | None = None, hi: int | None = None) -> int:
+    """Read a numeric arg the way the MODEL actually sends it.
+
+    A schema says `{"type": "integer"}`; a model still sends `null`, `"7"`,
+    `"a week"`, or `7.5`. Bare `int(args.get(...))` turns every one of those into
+    a TypeError/ValueError that surfaces to Trav as a raw traceback for what was
+    a perfectly sensible request. Fall back to the default instead, and clamp —
+    a negative or enormous window is its own class of bug (limit=0 once sliced
+    an entire inbox).
+    """
+    raw = args.get(key)
+    if raw is None or isinstance(raw, bool):
+        value = default
+    else:
+        try:
+            value = int(float(raw))  # float() first so "7.0" and 7.5 both work
+        except (TypeError, ValueError):
+            value = default
+    if lo is not None:
+        value = max(lo, value)
+    if hi is not None:
+        value = min(hi, value)
+    return value
+
+
+def _arg_list(args: dict[str, Any], key: str) -> list:
+    """Read a list arg. A model sometimes sends a bare string for a
+    single-element list, or null for an empty one; neither should crash."""
+    raw = args.get(key)
+    if raw is None:
+        return []
+    if isinstance(raw, (str, bytes)):
+        return [raw]
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    return [raw]
+
+
 def _connector_call(name: str, args: dict[str, Any],
                     goal_id: str | None = None) -> Any:
     if name == "get_calendar":
-        return gcal.list_events(int(args.get("days", 7)))
+        return gcal.list_events(_arg_int(args, "days", 7, 1, 60))
     if name == "create_calendar_event":
         return gcal.create_event(
             args["title"], args["start_iso"], args["end_iso"], args.get("description", "")
@@ -136,15 +175,15 @@ def _connector_call(name: str, args: dict[str, Any],
         return gmail_imap.unread_summary()
     if name == "get_inbox_recent":
         return gmail_imap.inbox_recent(
-            max(1, min(int(args.get("limit", 25)), 50)),  # 0/neg would slice the WHOLE inbox
-            days=int(args["days"]) if args.get("days") else None,
+            _arg_int(args, "limit", 25, 1, 50),  # 0/neg would slice the WHOLE inbox
+            days=_arg_int(args, "days", 0, 0, 60) or None,
         )
     if name == "archive_emails":
-        return gmail_imap.archive_messages([str(u) for u in args.get("uids", [])])
+        return gmail_imap.archive_messages([str(u) for u in _arg_list(args, "uids")])
     if name == "send_email":
         return gmail_imap.send_email(args["to"], args["subject"], args["body"])
     if name == "vault_log":
-        return vault_github.append_log(args["title"], list(args.get("lines", [])))
+        return vault_github.append_log(str(args["title"]), [str(x) for x in _arg_list(args, "lines")])
     if name == "save_to_vault":
         return _save_to_vault(str(args["title"]), str(args["content"]),
                               str(args.get("category", "output")))
@@ -163,7 +202,7 @@ def _connector_call(name: str, args: dict[str, Any],
                     "other tools. (Trav turns it on with the exec toggle.)")
         return local_llm.chat(str(args["prompt"]))
     if name == "get_finance":
-        s = simplefin.summary(int(args.get("days", 30)))
+        s = simplefin.summary(_arg_int(args, "days", 30, 1, 365))
         # trim the transaction list for the model — it just needs the shape
         return {**s, "transactions": s.get("transactions", [])[:15]}
     if name == "get_health":
@@ -173,10 +212,10 @@ def _connector_call(name: str, args: dict[str, Any],
                           "note": "No fresh Apple Watch data — skip health commentary."}
     if name == "get_recent_activity":
         from . import ingest
-        return {"activity": ingest.gather_recent(min(int(args.get("days", 7)), 14))[:20000]}
+        return {"activity": ingest.gather_recent(_arg_int(args, "days", 7, 1, 14))[:20000]}
     if name == "get_audit_log":
         from . import audit
-        return audit.recent(hours=int(args.get("hours", 24)),
+        return audit.recent(hours=_arg_int(args, "hours", 24, 1, 720),
                             sensitive_only=bool(args.get("sensitive", False)))
     if name == "run_on_laptop":
         from . import local
@@ -212,7 +251,7 @@ def _connector_call(name: str, args: dict[str, Any],
         _log_gdrive_artifact(res)
         return res
     if name == "create_google_sheet":
-        res = composio.create_sheet(str(args["title"]), args.get("rows") or None,
+        res = composio.create_sheet(str(args["title"]), _arg_list(args, "rows") or None,
                                     folder=args.get("folder") or None)
         _log_gdrive_artifact(res)
         return res
@@ -235,7 +274,7 @@ def _connector_call(name: str, args: dict[str, Any],
         _log_gdrive_artifact({**res, "title": args.get("name", "Google Doc")}, action="updated")
         return res
     if name == "edit_google_sheet":
-        res = composio.edit_sheet(str(args["spreadsheet_id"]), args["rows"], args.get("sheet"))
+        res = composio.edit_sheet(str(args["spreadsheet_id"]), _arg_list(args, "rows"), args.get("sheet"))
         _log_gdrive_artifact({**res, "title": args.get("name", "Google Sheet")}, action="updated")
         return res
     if name == "add_google_slides":
@@ -261,7 +300,7 @@ def _connector_call(name: str, args: dict[str, Any],
                                    str(args.get("range") or "A1:Z200"))
     if name == "update_google_sheet":
         res = composio.update_sheet(str(args["spreadsheet_id"]), str(args["range"]),
-                                    args["rows"])
+                                    _arg_list(args, "rows"))
         _log_gdrive_artifact({**res, "title": args.get("name", "Google Sheet")}, action="updated")
         return res
     if name == "draft_email":
@@ -270,13 +309,13 @@ def _connector_call(name: str, args: dict[str, Any],
                                            thread_id=args.get("thread_id") or None)
     if name == "get_weather":
         from .connectors import world
-        return world.weather(str(args.get("place") or "Baltimore"), int(args.get("days", 3)))
+        return world.weather(str(args.get("place") or "Baltimore"), _arg_int(args, "days", 3, 1, 7))
     if name == "get_travel_time":
         from .connectors import world
         return world.travel_time(str(args["origin"]), str(args["destination"]))
     if name == "get_canvas":
         from .connectors import canvas
-        return canvas.upcoming(int(args.get("days", 14)))
+        return canvas.upcoming(_arg_int(args, "days", 14, 1, 60))
     if name == "spotify_play":
         return composio.spotify_play(str(args.get("query", "")), str(args.get("uri", "")))
     if name == "spotify_control":
@@ -288,9 +327,9 @@ def _connector_call(name: str, args: dict[str, Any],
     if name == "get_music_taste":
         return composio.spotify_taste(str(args.get("time_range") or "medium_term"))
     if name == "spotify_recent":
-        return composio.spotify_recent(int(args.get("limit", 25)))
+        return composio.spotify_recent(_arg_int(args, "limit", 25, 1, 50))
     if name == "spotify_queue":
-        return composio.spotify_queue(list(args.get("uris") or []))
+        return composio.spotify_queue([str(u) for u in _arg_list(args, "uris")])
     if name == "vault_recall":
         from . import vault_index
         return vault_index.search(str(args["query"]))
@@ -318,7 +357,7 @@ def _connector_call(name: str, args: dict[str, Any],
     if name == "create_github_issue":
         from .connectors import github_api
         return github_api.create_issue(str(args["title"]), str(args.get("body", "")),
-                                       args.get("repo"), args.get("labels"))
+                                       args.get("repo"), _arg_list(args, "labels"))
     raise ValueError(f"unknown tool {name}")
 
 
