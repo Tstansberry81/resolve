@@ -153,6 +153,111 @@ def dead() -> dict[str, str]:
                 for cid, (ok, reason) in _cache.items() if not ok}
 
 
+# --- proactive alerting ------------------------------------------------------
+# Trav found out his GitHub token had died by asking for work and getting a wrong
+# explanation. The point of this half is that he hears it from RESOLVE first.
+#
+# The existing worker watchdog is deliberately dashboard-only ("NO Telegram, per
+# Trav"). This one does push, because he asked for it — so it earns that by never
+# repeating itself: only STATE CHANGES are announced, never the ongoing fact of a
+# lane being down.
+
+CHECK_INTERVAL_SECONDS = 600
+# A flapping lane (rate limits, a wobbly upstream) must not become a pager.
+ALERT_COOLDOWN_SECONDS = 3600
+
+_prev_state: dict[str, bool] | None = None   # None = no baseline taken yet
+_last_alert_at: dict[str, float] = {}
+_last_watchdog_run: float = 0.0
+
+_FIXES = {
+    "vault": "Render → GITHUB_TOKEN (needs repo scope on vault + resolve)",
+    "notion": "Render → NOTION_TOKEN, and share a parent page with the integration",
+    "google": "Composio → reconnect Google",
+    "spotify": "Render → COMPOSIO_ACCOUNTS={\"spotify\":\"spotify_acture-borago\"}",
+    "calendar": "Render → Google service-account credentials",
+}
+
+
+def _notify(text: str, level: str = "warn") -> None:
+    """Telegram push. Best-effort: a Telegram blip must never break the tick, and
+    the dashboard event is emitted separately so the record survives either way."""
+    from .connectors import telegram_notify
+
+    try:
+        if telegram_notify.configured():
+            telegram_notify.send(text)
+    except Exception:
+        log.warning("liveness telegram push failed", exc_info=True)
+
+
+async def watchdog_tick() -> None:
+    """Announce connector state CHANGES. Called once a minute by the scheduler;
+    probes at most every CHECK_INTERVAL_SECONDS.
+
+    Silent by design when nothing changed — a message every ten minutes saying
+    the same lane is still down is how an alert channel gets muted, and a muted
+    channel is worse than none.
+    """
+    global _prev_state, _last_watchdog_run
+
+    import asyncio
+
+    from . import bus
+
+    now = time.time()
+    if now - _last_watchdog_run < CHECK_INTERVAL_SECONDS:
+        return
+    _last_watchdog_run = now
+
+    try:
+        results = await asyncio.to_thread(refresh)
+    except Exception:
+        log.exception("liveness probe failed during watchdog tick")
+        return
+
+    current = {cid: ok for cid, (ok, _reason) in results.items()}
+    reasons = {cid: reason for cid, (_ok, reason) in results.items()}
+
+    # First tick after a boot or deploy: no baseline to compare against. Report
+    # anything already broken ONCE, then fall through to change-only reporting.
+    if _prev_state is None:
+        _prev_state = current
+        broken = {cid: reasons[cid] for cid, ok in current.items() if not ok}
+        if broken:
+            for cid in broken:
+                _last_alert_at[cid] = now
+            lines = "\n".join(
+                f"• {cid}: {broken[cid]}\n  fix: {_FIXES.get(cid, 'check its credentials')}"
+                for cid in sorted(broken))
+            await bus.emit("core", "system.connectors_down",
+                           f"{len(broken)} connector(s) down at startup",
+                           detail=lines, level="warn")
+            _notify(f"⚠️ RESOLVE started with {len(broken)} connector(s) down:\n\n{lines}")
+        return
+
+    for cid, ok in current.items():
+        was = _prev_state.get(cid)
+        if was is None or was == ok:
+            continue
+        if not ok:
+            if now - _last_alert_at.get(cid, 0.0) < ALERT_COOLDOWN_SECONDS:
+                continue  # flap guard
+            _last_alert_at[cid] = now
+            reason = reasons.get(cid) or "unknown failure"
+            fix = _FIXES.get(cid, "check its credentials")
+            await bus.emit("core", "system.connector_down",
+                           f"{cid} just went down: {reason}",
+                           detail=f"{reason}\nfix: {fix}", level="warn")
+            _notify(f"⚠️ RESOLVE lost {cid}\n\n{reason}\n\nFix: {fix}")
+        else:
+            await bus.emit("core", "system.connector_up", f"{cid} is back up",
+                           level="info")
+            _notify(f"✅ RESOLVE: {cid} is back up.", level="info")
+
+    _prev_state = current
+
+
 def for_prompt() -> str:
     """The system-prompt block. "" when everything's fine or nothing is known yet.
 

@@ -303,6 +303,13 @@ async def scheduler_loop() -> None:
         except Exception:
             log.exception("worker watchdog tick failed")
         try:
+            from . import liveness
+            # Connector went dead → tell him now, not when a request fails.
+            # Rate-limited internally: probes every 10 min, alerts only on change.
+            await liveness.watchdog_tick()
+        except Exception:
+            log.exception("connector watchdog tick failed")
+        try:
             from . import costs
             await asyncio.to_thread(costs.persist)  # flush cost totals to Supabase
         except Exception:

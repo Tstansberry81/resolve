@@ -11,6 +11,10 @@ import pytest
 
 from resolve_control_plane import liveness
 
+# Captured before any fixture patches it, so a test can put the real one back and
+# exercise its internal error handling.
+_REAL_NOTIFY = liveness._notify
+
 
 @pytest.fixture(autouse=True)
 def _fresh():
@@ -206,3 +210,126 @@ def test_spotify_probe_reuses_the_live_error_translator(monkeypatch):
 
     monkeypatch.setattr(composio, "execute", boom)
     assert "COMPOSIO_ACCOUNTS" in (composio.probe("spotify") or "")
+
+
+# --- proactive alerting ------------------------------------------------------
+
+@pytest.fixture
+def watchdog(monkeypatch):
+    """Reset watchdog state and capture every alert instead of sending it."""
+    liveness._prev_state = None
+    liveness._last_alert_at = {}
+    liveness._last_watchdog_run = 0.0
+    pushes: list[str] = []
+    events: list[tuple] = []
+
+    monkeypatch.setattr(liveness, "_notify",
+                        lambda text, level="warn": pushes.append(text))
+
+    async def fake_emit(source, kind, msg, detail=None, level="info"):
+        events.append((kind, msg, detail))
+
+    import resolve_control_plane.bus as bus
+    monkeypatch.setattr(bus, "emit", fake_emit)
+    return pushes, events
+
+
+def _tick(monkeypatch, **lanes):
+    _probes(monkeypatch, **lanes)
+    liveness._last_watchdog_run = 0.0
+    import asyncio
+    asyncio.run(liveness.watchdog_tick())
+
+
+def test_startup_with_everything_healthy_is_silent(monkeypatch, watchdog):
+    pushes, events = watchdog
+    _tick(monkeypatch, vault=None, notion=None)
+    assert pushes == []
+    assert events == []
+
+
+def test_startup_reports_what_is_already_broken_once(monkeypatch, watchdog):
+    pushes, events = watchdog
+    _tick(monkeypatch, vault="GITHUB_TOKEN rejected (401)", notion=None)
+    assert len(pushes) == 1
+    assert "401" in pushes[0]
+    assert "GITHUB_TOKEN" in pushes[0]  # the fix hint
+    assert events[0][0] == "system.connectors_down"
+
+
+def test_a_lane_going_down_pushes_exactly_once(monkeypatch, watchdog):
+    """The alert Trav actually wants: the moment it breaks."""
+    pushes, _ = watchdog
+    _tick(monkeypatch, vault=None)              # baseline: healthy
+    assert pushes == []
+    _tick(monkeypatch, vault="GITHUB_TOKEN rejected (401)")
+    assert len(pushes) == 1
+    assert "lost vault" in pushes[0]
+    # still down ten minutes later — must NOT push again
+    _tick(monkeypatch, vault="GITHUB_TOKEN rejected (401)")
+    _tick(monkeypatch, vault="GITHUB_TOKEN rejected (401)")
+    assert len(pushes) == 1
+
+
+def test_recovery_is_announced(monkeypatch, watchdog):
+    pushes, _ = watchdog
+    _tick(monkeypatch, vault=None)
+    _tick(monkeypatch, vault="dead")
+    _tick(monkeypatch, vault=None)
+    assert "back up" in pushes[-1]
+
+
+def test_a_flapping_lane_is_not_a_pager(monkeypatch, watchdog):
+    """Down/up/down inside the cooldown must not push twice."""
+    pushes, _ = watchdog
+    _tick(monkeypatch, vault=None)
+    _tick(monkeypatch, vault="rate limited")
+    _tick(monkeypatch, vault=None)
+    _tick(monkeypatch, vault="rate limited")
+    downs = [p for p in pushes if "lost" in p]
+    assert len(downs) == 1
+
+
+def test_it_probes_at_most_every_ten_minutes(monkeypatch, watchdog):
+    """Once a minute from the scheduler must not mean once a minute to GitHub."""
+    hits: list[int] = []
+    monkeypatch.setattr(liveness, "_probes",
+                        lambda: {"vault": ("Vault", lambda: hits.append(1) and None)})
+    import asyncio
+    liveness._last_watchdog_run = 0.0
+    asyncio.run(liveness.watchdog_tick())
+    for _ in range(5):
+        asyncio.run(liveness.watchdog_tick())   # simulated minute ticks
+    assert len(hits) == 1
+
+
+def test_a_telegram_outage_never_breaks_the_tick(monkeypatch, watchdog):
+    """Patches the REAL dependency, not _notify itself — replacing _notify would
+    step over the very guard this is meant to prove."""
+    _pushes, events = watchdog
+    monkeypatch.setattr(liveness, "_notify", _REAL_NOTIFY)
+
+    from resolve_control_plane.connectors import telegram_notify
+
+    monkeypatch.setattr(telegram_notify, "configured", lambda: True)
+
+    def boom(text):
+        raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(telegram_notify, "send", boom)
+
+    _tick(monkeypatch, vault=None)
+    _tick(monkeypatch, vault="dead")          # must not raise
+    assert any(k == "system.connector_down" for k, _m, _d in events)
+
+
+def test_no_telegram_configured_is_not_an_error(monkeypatch, watchdog):
+    _pushes, events = watchdog
+    monkeypatch.setattr(liveness, "_notify", _REAL_NOTIFY)
+
+    from resolve_control_plane.connectors import telegram_notify
+
+    monkeypatch.setattr(telegram_notify, "configured", lambda: False)
+    _tick(monkeypatch, vault=None)
+    _tick(monkeypatch, vault="dead")
+    assert any(k == "system.connector_down" for k, _m, _d in events)
