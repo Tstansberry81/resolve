@@ -108,13 +108,52 @@ def connectors() -> dict:
 
 
 def _connector_health() -> list[dict]:
+    """Dashboard dots. Prefers a real liveness probe over "is the env var set".
+
+    A dot that goes green because a string exists is worse than no dot: it's an
+    active assurance that the lane works. Where a probe exists its verdict wins,
+    and a dead lane carries the reason so the dot is diagnostic rather than just
+    red. Lanes with no probe fall back to configured() and say so.
+    """
+    from . import liveness
+
     labels = {"vault": "Vault (GitHub)", "gmail": "Gmail", "calendar": "Calendar",
               "notion": "Notion", "google": "Google Docs", "health": "Health (Watch)"}
+    probed = liveness.snapshot(refresh_if_stale=False)
     out = []
     for cid, check in CONNECTOR_AVAILABLE.items():
+        entry = probed.get(cid)
+        if entry and entry["status"] in ("live", "dead"):
+            out.append({"id": cid, "label": labels.get(cid, cid),
+                        "status": "healthy" if entry["status"] == "live" else "down",
+                        "detail": entry.get("detail"), "verified": True,
+                        "latencyMs": 0})
+            continue
+        try:
+            present = bool(check())
+        except Exception:
+            present = False
         out.append({"id": cid, "label": labels.get(cid, cid),
-                    "status": "healthy" if check() else "down", "latencyMs": 0})
+                    "status": "healthy" if present else "down",
+                    "detail": None if present else "not configured",
+                    "verified": False, "latencyMs": 0})
     return out
+
+
+@app.get("/v1/connector-health", dependencies=[Depends(auth)])
+async def connector_health(refresh: bool = False) -> dict:
+    """Real connector status, with the reason for anything broken.
+
+    Deliberately NOT folded into /healthz: Render polls that to decide whether
+    the deploy is alive, and making it fan out to GitHub, Notion and Composio
+    would turn a third-party outage into a failed deploy.
+    """
+    from . import liveness
+
+    data = await anyio.to_thread.run_sync(
+        lambda: liveness.snapshot(refresh_if_stale=bool(refresh)))
+    broken = {cid: v["detail"] for cid, v in data.items() if v["status"] == "dead"}
+    return {"connectors": data, "broken": broken, "allLive": not broken}
 
 
 @app.get("/v1/snapshot", dependencies=[Depends(auth)])

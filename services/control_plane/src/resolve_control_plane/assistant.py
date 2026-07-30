@@ -832,11 +832,19 @@ async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = N
 
     # Static SYSTEM + tools are prompt-cached (billed 0.1x after the first turn);
     # the datetime + shortcut lines are a tiny uncached block so they can't bust it.
+    # Broken-connector warnings go in the DYNAMIC half on purpose: they change as
+    # tokens die and get fixed, and putting them in the cached half would bust the
+    # cache every time a lane flapped. for_prompt() reads a cache and never blocks
+    # on a network probe, so this costs the turn nothing.
+    from . import liveness
+    health_block = liveness.for_prompt()
+
     system = cached_system(static, (
         f"Right now it is {now.strftime('%A, %B %d, %Y at %I:%M %p')} Eastern."
         " Resolve every relative date (tomorrow, Sunday, next week) from this —"
         " never guess weekdays. 'Tomorrow' always means the next calendar date,"
         " even between midnight and dawn." + sc_hint + (" " + guide.hint_if_missing())
+        + (f"\n\n{health_block}" if health_block else "")
     ))
     messages: list[dict[str, Any]] = []
     for prior_user, prior_reply in history:

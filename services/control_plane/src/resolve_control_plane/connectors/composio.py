@@ -70,6 +70,35 @@ def execute(tool_slug: str, arguments: dict) -> dict:
     return data
 
 
+def probe(toolkit: str = "spotify") -> str | None:
+    """Verify a Composio lane end to end. None = live, else why not.
+
+    configured() only proves COMPOSIO_API_KEY is set. It says nothing about
+    whether the toolkit is connected, whether the OAuth scopes cover what we
+    call, or — the one that actually bit — whether two connected accounts make
+    every call ambiguous. Each probe is the cheapest real read in its lane, so a
+    green light here means the lane genuinely works.
+    """
+    if not configured():
+        return "COMPOSIO_API_KEY not set"
+    slug, args = {
+        # Verified working slugs. Spotify's top-artists is deliberately the probe:
+        # it needs the account pin AND user-top-read, the two things that break.
+        "spotify": ("SPOTIFY_GET_USER_S_TOP_ARTISTS", {"limit": 1}),
+        "google": ("GOOGLEDRIVE_FIND_FILE",
+                   {"q": "trashed = false", "fields": "files(id)", "pageSize": 1}),
+    }.get(toolkit, ("", {}))
+    if not slug:
+        return f"no probe defined for toolkit {toolkit}"
+    try:
+        execute(slug, args)
+    except Exception as exc:
+        # Route it through the same translator the live calls use, so the status
+        # page and a failed request explain the problem identically.
+        return _spotify_hint(str(exc), slug) if toolkit == "spotify" else str(exc)[:200]
+    return None
+
+
 def _col_letter(n: int) -> str:
     """1-indexed column number → A1 letters (1→A, 27→AA)."""
     s = ""

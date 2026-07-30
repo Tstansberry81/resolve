@@ -34,6 +34,35 @@ def _headers() -> dict[str, str]:
     }
 
 
+def probe(timeout: int = 6) -> str | None:
+    """Verify the token works AND can see something. None = live, else why not.
+
+    Notion has a second failure mode no credential check catches: a perfectly
+    valid token that's been shared zero pages, which authenticates fine and then
+    finds nothing. That reads as "your workspace is empty" unless it's called out
+    here.
+    """
+    if not configured():
+        return "NOTION_TOKEN not set"
+    try:
+        r = requests.get(f"{API}/users/me", headers=_headers(), timeout=timeout)
+    except Exception as exc:
+        return f"cannot reach api.notion.com ({type(exc).__name__})"
+    if r.status_code == 401:
+        return "NOTION_TOKEN rejected (401) — revoked or wrong secret"
+    if r.status_code != 200:
+        return f"Notion returned {r.status_code} on /users/me"
+    try:
+        found = requests.post(f"{API}/search", headers=_headers(),
+                              json={"page_size": 1}, timeout=timeout)
+        if found.status_code == 200 and not (found.json().get("results") or []):
+            return ("token valid but NO pages are shared with the integration — "
+                    "connect a parent page in Notion (see docs/NOTION_ACCESS.md)")
+    except Exception:
+        pass  # the auth check above already passed; don't fail the probe on this
+    return None
+
+
 def _req(method: str, path: str, **kw) -> dict:
     r = requests.request(method, f"{API}{path}", headers=_headers(), timeout=TIMEOUT, **kw)
     if r.status_code >= 400:

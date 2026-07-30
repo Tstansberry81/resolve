@@ -36,6 +36,38 @@ def _headers() -> dict[str, str]:
     }
 
 
+def probe(timeout: int = 6) -> str | None:
+    """Verify the token can actually WRITE the vault. None = live, else why not.
+
+    configured() only proves GITHUB_TOKEN is a non-empty string. A revoked or
+    under-scoped token passes that and fails every real call, which is how the
+    vault stayed "healthy" on the dashboard for days while nothing could read
+    the operator brief or save a note.
+    """
+    if not configured():
+        return "GITHUB_TOKEN not set"
+    try:
+        r = requests.get(f"https://api.github.com/repos/{VAULT_REPO}",
+                         headers=_headers(), timeout=timeout)
+    except Exception as exc:
+        return f"cannot reach api.github.com ({type(exc).__name__})"
+    if r.status_code == 401:
+        return "GITHUB_TOKEN rejected (401) — revoked or expired"
+    if r.status_code == 403:
+        return "GITHUB_TOKEN forbidden (403) — missing scope, or rate limited"
+    if r.status_code == 404:
+        return (f"{VAULT_REPO} invisible to this token (404) — fine-grained PAT "
+                "without this repo selected, or wrong GITHUB_VAULT_REPO")
+    if r.status_code != 200:
+        return f"GitHub returned {r.status_code}"
+    try:
+        if not (r.json().get("permissions") or {}).get("push"):
+            return f"token is READ-ONLY on {VAULT_REPO} — vault saves will fail"
+    except ValueError:
+        return "GitHub returned an unreadable response"
+    return None
+
+
 def append_log(title: str, lines: list[str]) -> dict:
     """Append an entry to TODAY's log file, creating it on the first write of
     the day (read → append → PUT with sha; PUT without sha when it's new)."""
