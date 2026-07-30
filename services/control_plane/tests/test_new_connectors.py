@@ -163,8 +163,39 @@ def test_play_with_nothing_resumes(monkeypatch):
 
 
 def test_spotify_errors_become_instructions():
-    assert "open Spotify" in composio._spotify_hint("Composio X failed: 404 no active device")
-    assert "Premium" in composio._spotify_hint("HTTP 403 premium required")
+    play = "SPOTIFY_START_RESUME_PLAYBACK"
+    assert "open Spotify" in composio._spotify_hint(
+        "Composio X failed: 404 no active device", play)
+    assert "Premium" in composio._spotify_hint("HTTP 403 premium required", play)
+
+
+def test_a_read_failure_is_never_blamed_on_a_device():
+    """The regression this whole fix exists for.
+
+    Top artists / top tracks / recently-played read from Spotify's servers and
+    need no device at all. Reporting them as "no active Spotify device" sent Trav
+    to press play on his Mac, which cannot fix a connection problem, and buried
+    the real cause. Any 4xx on a read must say so plainly.
+    """
+    for slug in ("SPOTIFY_GET_USER_S_TOP_ARTISTS",
+                 "SPOTIFY_GET_USER_S_TOP_TRACKS",
+                 "SPOTIFY_GET_RECENTLY_PLAYED_TRACKS"):
+        msg = composio._spotify_hint(f"Composio {slug} HTTP 404: not found", slug)
+        assert "NOT a device problem" in msg
+        assert "open Spotify" not in msg
+        # the raw error survives, so a real diagnosis is still possible
+        assert "HTTP 404" in msg
+
+
+def test_account_ambiguity_beats_every_other_hint():
+    """Two connected Spotify accounts fail every call. It must be reported as
+    itself even when the error text also contains a 404."""
+    for slug in ("SPOTIFY_GET_USER_S_TOP_ARTISTS", "SPOTIFY_START_RESUME_PLAYBACK"):
+        msg = composio._spotify_hint(
+            "Composio failed: HTTP 404 multiple connected accounts found, "
+            "account selection required", slug)
+        assert "COMPOSIO_ACCOUNTS" in msg
+        assert "open Spotify" not in msg
 
 
 def test_replace_in_doc_rejects_empty_find():

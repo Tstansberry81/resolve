@@ -315,33 +315,72 @@ def create_gmail_draft(to: str, subject: str, body: str,
 # it playback calls fail with an account-selection error, which _spotify_hint
 # below turns into an instruction instead of a stack trace.
 
+# Only these need somewhere to actually play. Everything else — top artists,
+# top tracks, recently played, search — is a plain read of Spotify's servers and
+# works fine with every device Trav owns switched off.
+_PLAYBACK_SLUGS = frozenset({
+    "SPOTIFY_START_RESUME_PLAYBACK",
+    "SPOTIFY_PAUSE_PLAYBACK",
+    "SPOTIFY_SKIP_TO_NEXT",
+    "SPOTIFY_SKIP_TO_PREVIOUS",
+    "SPOTIFY_ADD_ITEM_TO_PLAYBACK_QUEUE",
+})
+
+
 def _spotify(slug: str, args: dict | None = None) -> dict:
     try:
         return execute(slug, args or {})
     except RuntimeError as exc:
-        raise RuntimeError(_spotify_hint(str(exc))) from exc
+        raise RuntimeError(_spotify_hint(str(exc), slug)) from exc
 
 
-def _spotify_hint(msg: str) -> str:
+def _spotify_hint(msg: str, slug: str = "") -> str:
+    """Turn a Composio failure into an instruction Trav can act on.
+
+    The ordering and the slug both matter. This used to map ANY error whose text
+    contained "404" to "no active device", which meant the two most common real
+    failures — Composio not knowing which of the two connected accounts to use,
+    and a missing OAuth scope — were both reported as a device problem. That
+    sends him to open Spotify and press play, which fixes neither, and the reads
+    it was reported for never needed a device in the first place.
+    """
     low = msg.lower()
-    # Scope errors first: a 403 from a history call means the connection was
-    # authorized without user-top-read / user-read-recently-played, and no amount
-    # of retrying fixes it. Reconnecting in Composio does.
+    playback = slug in _PLAYBACK_SLUGS
+
+    # Account ambiguity first: it fails EVERY call, playback and read alike, and
+    # nothing downstream is diagnosable until it's pinned.
+    if "connected_account" in low or ("account" in low and
+                                      ("select" in low or "multiple" in low or
+                                       "ambiguous" in low)):
+        return ("Two Spotify accounts are connected to Composio, so it can't tell "
+                "which one to use. Pin it with "
+                "COMPOSIO_ACCOUNTS='{\"spotify\":\"spotify_acture-borago\"}' and "
+                "redeploy — until then every Spotify call fails, not just this one.")
+    # Scope: a 403 on a history call means the connection was authorized without
+    # user-top-read / user-read-recently-played. Retrying never fixes it.
     if "scope" in low or "insufficient" in low:
         return (
             "Spotify won't share that without extra permissions. Reconnect Spotify in "
             "Composio and grant user-top-read, user-read-recently-played, and "
             "user-library-read — then ask me again.")
-    if "no active device" in low or "404" in low:
+    # A device error is only possible on a playback call.
+    if playback and ("no active device" in low or "no_active_device" in low
+                     or "device" in low):
         return ("No active Spotify device — open Spotify on your phone, Mac, or a "
                 "speaker and play something for a second, then ask me again.")
-    if "premium" in low or "403" in low:
-        return ("Spotify refused that. Either it needs Premium, or the connection is "
-                "missing a permission — for listening history, reconnect Spotify in "
-                "Composio with user-top-read and user-read-recently-played.")
-    if "account" in low and "select" in low:
-        return ("Two Spotify accounts are connected, so I can't tell which to use — "
-                "set COMPOSIO_ACCOUNTS with a \"spotify\" entry to pin one.")
+    if playback and ("premium" in low or "403" in low):
+        return ("Spotify refused that. Playback control needs Premium, or the "
+                "connection is missing a playback permission — reconnect Spotify in "
+                "Composio with user-modify-playback-state.")
+    # A read that failed. Say what it actually is rather than blaming a device:
+    # these endpoints don't have one.
+    if not playback and ("404" in low or "403" in low or "401" in low):
+        return (f"Spotify rejected {slug or 'that read'} — and this is NOT a device "
+                "problem: top artists, top tracks and recently-played read from "
+                "Spotify's servers and work with everything switched off. It's the "
+                "connection itself. Check COMPOSIO_ACCOUNTS pins a \"spotify\" "
+                "account, then that the connection has user-top-read and "
+                f"user-read-recently-played. Raw error: {msg}")
     return msg
 
 
@@ -404,7 +443,7 @@ def spotify_taste(time_range: str = "medium_term") -> dict:
               "medium_term": "the last ~6 months",
               "long_term": "the last ~year"}[time_range]
 
-    return {
+    out = {
         "window": window,
         "topArtists": top_artists,
         # Ranked by how many of his top artists carry the genre - a far better
@@ -412,6 +451,16 @@ def spotify_taste(time_range: str = "medium_term") -> dict:
         "topGenres": [g for g, _ in sorted(genres.items(), key=lambda kv: -kv[1])][:12],
         "topTracks": _tracks(tracks.get("items") or []),
     }
+    # Observed 2026-07: the artist objects come back with no `genres` key at all,
+    # so topGenres is empty even on a completely healthy call. Say that out loud
+    # — otherwise "no genres" reads as "no taste data" and the recommending
+    # silently falls back to guessing, which is the failure this connector exists
+    # to prevent. The artist and track lists are still real; use those.
+    if top_artists and not out["topGenres"]:
+        out["genresNote"] = ("Spotify returned no genre tags for these artists. "
+                             "Recommend from the artist and track lists instead — "
+                             "they're real. Don't claim to be working from genres.")
+    return out
 
 
 def spotify_queue(uris: list[str]) -> dict:
