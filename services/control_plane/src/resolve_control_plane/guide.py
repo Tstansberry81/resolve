@@ -44,36 +44,77 @@ MAX_CHARS = 8000
 TTL_SECONDS = int(os.getenv("RESOLVE_GUIDE_TTL", "300"))
 
 _cache: tuple[float, str] | None = None
+# Why the brief is empty, when it is. "" and "unreadable" are NOT the same thing:
+# an empty brief means Trav hasn't written one, and a failed fetch means he has
+# and we couldn't get it. Collapsing both to "" once made RESOLVE tell him to go
+# write a brief that had been in his vault for four days, because a broken
+# GITHUB_TOKEN and a missing file were indistinguishable from here.
+_status: str = "absent"
 
 
 def invalidate() -> None:
     """Drop the cached copy — used by tests and after a known edit."""
-    global _cache
+    global _cache, _status
     _cache = None
+    _status = "absent"
+
+
+def status() -> str:
+    """"ok" | "absent" | "unreadable" for the last load."""
+    load()
+    return _status
+
+
+def _is_404(exc: Exception) -> bool:
+    """Did this failure mean "no such file" rather than "couldn't ask"?
+
+    The structured status code is the real check. The string fallback only
+    covers callers that raise a bare error with no response attached, and it
+    deliberately does NOT decide anything on its own beyond that — guessing at
+    substrings is how the Spotify connector ended up reporting an auth failure
+    as a missing playback device.
+    """
+    resp = getattr(exc, "response", None)
+    code = getattr(resp, "status_code", None)
+    if code is not None:
+        return code == 404
+    return "404" in str(exc)
 
 
 def load() -> str:
     """Current brief, or "" when there isn't one.
 
     Never raises: a missing file, an unreachable GitHub, or a bad token must
-    degrade to "no brief" rather than taking down every conversation.
+    degrade to "no brief" rather than taking down every conversation. But WHY
+    it's empty is recorded in `_status`, because the difference decides whether
+    RESOLVE should ask Trav to write a brief or tell him its token is broken.
     """
-    global _cache
+    global _cache, _status
     now = time.time()
     if _cache and now - _cache[0] < TTL_SECONDS:
         return _cache[1]
 
     text = ""
+    state = "absent"
     try:
         from .connectors import vault_github
 
         if vault_github.configured():
             text = (vault_github.read_file(GUIDE_PATH, limit=MAX_CHARS * 2)
                     .get("content", "") or "").strip()
-    except Exception:
-        # A 404 here is the normal case before Trav writes the file, so this is
-        # debug rather than a warning that would cry wolf on every turn.
-        log.debug("no operator brief at %s", GUIDE_PATH)
+            state = "ok" if text else "absent"
+    except Exception as exc:
+        if _is_404(exc):
+            # The normal state before Trav writes the file — debug, not a
+            # warning that would cry wolf on every turn.
+            log.debug("no operator brief at %s", GUIDE_PATH)
+            state = "absent"
+        else:
+            # A bad token, a revoked scope, an unreachable GitHub. The brief may
+            # well exist; we simply couldn't read it. This one IS worth warning
+            # about — it silently strips his whole brief out of the prompt.
+            log.warning("operator brief at %s unreadable: %s", GUIDE_PATH, exc)
+            state = "unreadable"
         text = ""
 
     if len(text) > MAX_CHARS:
@@ -82,6 +123,7 @@ def load() -> str:
                   "Trim it or split the details into linked notes.]")
 
     _cache = (now, text)
+    _status = state
     return text
 
 
@@ -108,10 +150,25 @@ def system_block() -> str:
 
 
 def hint_if_missing() -> str:
-    """One line telling the assistant the brief doesn't exist yet, so it can
-    suggest one when it's clearly guessing at what Trav meant."""
+    """One line about the brief's absence, so the assistant can suggest writing
+    one — but ONLY when it's genuinely not there.
+
+    The two cases have to read differently. Telling Trav to write a brief he
+    already wrote is worse than saying nothing: it asks him to redo finished work
+    and it hides the actual fault, which is that RESOLVE can't read his vault.
+    """
     if load():
         return ""
+    if _status == "unreadable":
+        return (
+            f"WARNING: Trav's operator brief ({GUIDE_PATH}) could NOT BE READ — the vault "
+            "fetch failed (most likely GITHUB_TOKEN is expired or missing a scope). Assume "
+            "the brief EXISTS and that you are currently running without it. Do NOT tell "
+            "him to write one and do NOT imply it's missing. If his shorthand is ambiguous, "
+            "say your vault access is broken so the brief didn't load, and that fixing the "
+            "GitHub token restores it. The same broken token also blocks every vault read "
+            "and write, so report that as one root cause rather than several problems."
+        )
     return (
         f"Trav hasn't written an operator brief yet ({GUIDE_PATH} in his vault). If you "
         "find yourself guessing at what one of his projects, files, or shorthand names "

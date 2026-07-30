@@ -100,6 +100,75 @@ def test_existing_brief_produces_no_nudge(monkeypatch):
     assert guide.hint_if_missing() == ""
 
 
+def _fails_with(monkeypatch, exc: Exception):
+    monkeypatch.setattr(vault_github, "configured", lambda: True)
+
+    def boom(path, limit=0):
+        raise exc
+
+    monkeypatch.setattr(vault_github, "read_file", boom)
+
+
+class _Resp:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+
+def _http_error(status: int) -> Exception:
+    exc = RuntimeError(f"HTTP {status}")
+    exc.response = _Resp(status)  # ty: ignore[unresolved-attribute]
+    return exc
+
+
+def test_an_unreadable_brief_is_not_reported_as_a_missing_one(monkeypatch):
+    """The regression this exists for.
+
+    A bad GITHUB_TOKEN 401s. That used to be indistinguishable from "no file",
+    so RESOLVE told Trav to write an operator brief that had been sitting in his
+    vault for four days — hiding the real fault, which was the token.
+    """
+    _fails_with(monkeypatch, _http_error(401))
+    assert guide.load() == ""
+    assert guide.status() == "unreadable"
+    hint = guide.hint_if_missing()
+    assert "could NOT BE READ" in hint
+    assert "GITHUB_TOKEN" in hint
+    # the sentence that caused the problem must not appear
+    assert "hasn't written" not in hint
+
+
+def test_a_genuine_404_still_reads_as_absent(monkeypatch):
+    """The nudge is still right when the file really isn't there."""
+    _fails_with(monkeypatch, _http_error(404))
+    assert guide.status() == "absent"
+    assert "hasn't written" in guide.hint_if_missing()
+
+
+def test_an_empty_file_is_absent_not_unreadable(monkeypatch):
+    _stub(monkeypatch, "")
+    assert guide.status() == "absent"
+
+
+def test_a_healthy_brief_reports_ok(monkeypatch):
+    _stub(monkeypatch, "# Brief")
+    assert guide.status() == "ok"
+
+
+@pytest.mark.parametrize("status", [401, 403, 500, 502])
+def test_every_non_404_failure_is_unreadable(monkeypatch, status):
+    """A revoked scope, a rate limit, a GitHub outage — all mean "the brief may
+    exist and we couldn't read it", never "he hasn't written one"."""
+    _fails_with(monkeypatch, _http_error(status))
+    assert guide.status() == "unreadable"
+
+
+def test_a_bare_network_error_is_unreadable(monkeypatch):
+    """No response object at all — a DNS or connection failure. Must not be
+    mistaken for a missing file."""
+    _fails_with(monkeypatch, OSError("connection refused"))
+    assert guide.status() == "unreadable"
+
+
 def test_resolve_cannot_rewrite_its_own_instructions(monkeypatch):
     """The whole reason the brief can be trusted as system-prompt content: a
     prompt injection reaching an ingest must not be able to edit it."""
