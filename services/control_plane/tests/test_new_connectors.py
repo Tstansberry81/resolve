@@ -284,3 +284,19 @@ def test_missing_scope_tells_him_to_reconnect_not_retry():
     msg = composio._spotify_hint("Composio X failed: 403 insufficient scope")
     assert "Reconnect Spotify" in msg
     assert "user-top-read" in msg
+
+
+def test_a_pin_to_a_nonexistent_account_says_so_precisely():
+    """The failure that actually shipped: COMPOSIO_ACCOUNTS was set, and pointed
+    at an account id belonging to a DIFFERENT Composio user. Telling him to
+    'check the pin is set' when the pin is set and wrong is the wrong fix."""
+    raw = ('Composio SPOTIFY_GET_USER_S_TOP_ARTISTS HTTP 404: {"error":{"message":'
+           '"No connected account found with ID spotify_acture-borago for user ID '
+           'trav for toolkit spotify","code":1810,'
+           '"slug":"ActionExecute_ConnectedAccountNotFound","status":404}}')
+    msg = composio._spotify_hint(raw, "SPOTIFY_GET_USER_S_TOP_ARTISTS")
+    assert "does NOT exist" in msg
+    assert "remove the \"spotify\" key" in msg
+    # must NOT repeat the old advice that sent him to verify a pin he'd already set
+    assert "Check COMPOSIO_ACCOUNTS pins" not in msg
+    assert "NOT a device problem" not in msg

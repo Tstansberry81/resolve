@@ -338,11 +338,20 @@ def create_gmail_draft(to: str, subject: str, body: str,
 
 
 # --- Spotify ---------------------------------------------------------------
-# Trav has Premium (required — the playback endpoints 403 without it) and TWO
-# connected Spotify accounts, so Composio can't pick one on its own. Pin the
-# right one with COMPOSIO_ACCOUNTS='{"spotify":"spotify_acture-borago"}'; without
-# it playback calls fail with an account-selection error, which _spotify_hint
-# below turns into an instruction instead of a stack trace.
+# Trav has Premium (required — the playback endpoints 403 without it).
+#
+# DO NOT copy a connected-account id out of another Composio user and pin it
+# here. Connected accounts are scoped per COMPOSIO_USER_ID, so an id from a
+# different user (e.g. one read out of a Claude/Composio integration) looks
+# entirely valid and resolves to nothing: "No connected account found with ID
+# … for user ID …". That cost a real debugging round trip — the pin was set,
+# which made every "is it configured?" check say yes.
+#
+# Prefer NO pin: with a single Spotify connection on this user, Composio
+# resolves it by itself. Only set COMPOSIO_ACCOUNTS when that genuinely reports
+# multiple accounts, and then take the id from the Composio dashboard under
+# THIS user id. _spotify_hint below turns each of those failures into an
+# instruction instead of a stack trace.
 
 # Only these need somewhere to actually play. Everything else — top artists,
 # top tracks, recently played, search — is a plain read of Spotify's servers and
@@ -374,9 +383,25 @@ def _spotify_hint(msg: str, slug: str = "") -> str:
     it was reported for never needed a device in the first place.
     """
     low = msg.lower()
+    flat = low.replace("_", "").replace(" ", "")
     playback = slug in _PLAYBACK_SLUGS
 
-    # Account ambiguity first: it fails EVERY call, playback and read alike, and
+    # A pin that points at an account that doesn't exist for THIS user id.
+    # Composio scopes connected accounts per user_id, so an account id copied
+    # from a different Composio user is valid-looking and resolves to nothing.
+    # This must be its own branch: telling someone to "check the pin is set"
+    # when the pin IS set and merely wrong is the exact wrong instruction.
+    if "connectedaccountnotfound" in flat or "noconnectedaccountfound" in flat:
+        return (
+            "COMPOSIO_ACCOUNTS pins a Spotify account id that does NOT exist for "
+            "RESOLVE's Composio user (COMPOSIO_USER_ID). The pin is set — it's just "
+            "pointing at nothing, so an account id copied from another Composio user "
+            "won't work. Fix: EASIEST is to remove the \"spotify\" key from "
+            "COMPOSIO_ACCOUNTS entirely — with only one Spotify connection on that "
+            "user, Composio resolves it by itself and no pin is needed. If that then "
+            "reports multiple accounts, get the real id from the Composio dashboard "
+            "under this user and pin that one instead.")
+    # Account ambiguity: it fails EVERY call, playback and read alike, and
     # nothing downstream is diagnosable until it's pinned.
     if "connected_account" in low or ("account" in low and
                                       ("select" in low or "multiple" in low or
