@@ -116,6 +116,17 @@ TOOLS: list[dict[str, Any]] = [
                         "FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261209T235959Z"
                     ),
                 },
+                "exclude_dates": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional YYYY-MM-DD dates the recurring series SKIPS — breaks, "
+                        "holidays, reading days. Pass them here rather than creating the "
+                        "series and deleting occurrences afterwards; a deleted occurrence "
+                        "is a separate call each and comes back if the series is rebuilt. "
+                        "Only meaningful alongside `recurrence`."
+                    ),
+                },
             },
             "required": ["title", "start_iso", "end_iso"],
             "additionalProperties": False,

@@ -54,12 +54,25 @@ def list_events(days: int = 7) -> list[dict]:
     return out
 
 
+DEFAULT_TZ = os.getenv("RESOLVE_TIMEZONE", "America/New_York")
+
+
+def _wall_time(start_iso: str) -> str:
+    """"HHMMSS" of the first occurrence, for EXDATE stamps."""
+    try:
+        return dt.datetime.fromisoformat(start_iso.replace("Z", "+00:00")).strftime("%H%M%S")
+    except ValueError:
+        return "000000"
+
+
 def create_event(
     title: str,
     start_iso: str,
     end_iso: str,
     description: str = "",
     recurrence: str = "",
+    exclude_dates: list[str] | None = None,
+    time_zone: str = "",
 ) -> dict:
     """Create an event. ``recurrence`` is an RFC 5545 RRULE for a repeating one.
 
@@ -72,14 +85,26 @@ def create_event(
     ``start_iso``/``end_iso`` are the FIRST meeting; the rule repeats it. UNTIL
     is UTC and must end in Z. Editing or deleting the returned id hits the whole
     series, which is the point.
+
+    ``exclude_dates`` are YYYY-MM-DD days the series skips -- breaks, holidays,
+    reading days -- emitted as EXDATE so they never exist rather than being
+    deleted one at a time afterwards.
+
+    A named ``timeZone`` is ALWAYS sent. Google rejects a recurring event without
+    one ("Missing time zone definition for start time") no matter what offset the
+    dateTime carries, because expanding an RRULE across a DST boundary needs a
+    zone, not a fixed offset. Filed as resolve#1 after every recurring create
+    404'd -- both -04:00 and Z forms.
     """
     svc = _service()
+    tz = time_zone or DEFAULT_TZ
     body: dict[str, Any] = {
         "summary": title,
         "description": description,
-        "start": {"dateTime": start_iso},
-        "end": {"dateTime": end_iso},
+        "start": {"dateTime": start_iso, "timeZone": tz},
+        "end": {"dateTime": end_iso, "timeZone": tz},
     }
+    rules: list[str] = []
     if recurrence:
         rule = recurrence.strip()
         # Accept a bare "FREQ=..." too. The model writes it that way about half
@@ -87,7 +112,16 @@ def create_event(
         # here than to lose a turn to a 400.
         if not rule.upper().startswith("RRULE:"):
             rule = f"RRULE:{rule}"
-        body["recurrence"] = [rule]
+        rules.append(rule)
+    if exclude_dates:
+        # EXDATE has to name the same wall-clock time as the occurrence it kills;
+        # a bare date silently matches nothing and the class still appears.
+        hhmmss = _wall_time(start_iso)
+        stamps = [f"{d.replace('-', '').strip()}T{hhmmss}" for d in exclude_dates if d and d.strip()]
+        if stamps:
+            rules.append(f"EXDATE;TZID={tz}:" + ",".join(stamps))
+    if rules:
+        body["recurrence"] = rules
     ev = svc.events().insert(calendarId=os.environ["GOOGLE_CALENDAR_ID"], body=body).execute()
     return {"id": ev.get("id"), "title": title, "link": ev.get("htmlLink"),
             "recurring": bool(recurrence)}
