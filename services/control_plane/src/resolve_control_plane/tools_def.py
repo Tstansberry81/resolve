@@ -86,14 +86,36 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "create_calendar_event",
-        "description": "Create a Google Calendar event. Times are ISO 8601 with offset, e.g. 2026-07-12T15:00:00-04:00.",
+        "description": (
+            "Create a Google Calendar event. Times are ISO 8601 with offset, e.g. "
+            "2026-07-12T15:00:00-04:00. For anything that REPEATS — a class, a weekly "
+            "meeting, a standing appointment — pass `recurrence` and create ONE event. "
+            "Never call this tool in a loop to book each occurrence separately: a "
+            "semester class is ~45 calls, 45 calendar rows, and 45 deletions when the "
+            "time changes."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
-                "start_iso": {"type": "string"},
-                "end_iso": {"type": "string"},
+                "start_iso": {
+                    "type": "string",
+                    "description": "Start of the FIRST occurrence when recurring.",
+                },
+                "end_iso": {
+                    "type": "string",
+                    "description": "End of the FIRST occurrence — same day as start_iso.",
+                },
                 "description": {"type": "string"},
+                "recurrence": {
+                    "type": "string",
+                    "description": (
+                        "Optional RFC 5545 recurrence rule; omit for a one-off. Days are "
+                        "MO TU WE TH FR SA SU, and UNTIL is UTC ending in Z. A MWF class "
+                        "running through Dec 9: "
+                        "FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261209T235959Z"
+                    ),
+                },
             },
             "required": ["title", "start_iso", "end_iso"],
             "additionalProperties": False,

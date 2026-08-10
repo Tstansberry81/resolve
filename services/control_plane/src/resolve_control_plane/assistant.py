@@ -170,7 +170,8 @@ def _connector_call(name: str, args: dict[str, Any],
         return gcal.list_events(_arg_int(args, "days", 7, 1, 60))
     if name == "create_calendar_event":
         return gcal.create_event(
-            args["title"], args["start_iso"], args["end_iso"], args.get("description", "")
+            args["title"], args["start_iso"], args["end_iso"], args.get("description", ""),
+            args.get("recurrence", ""),
         )
     if name == "get_tasks":
         return notion_api.list_open_tasks()

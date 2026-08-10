@@ -146,8 +146,10 @@ def _sandbox(monkeypatch):
     from resolve_control_plane.connectors import gcal, gmail_imap, local_llm, notion_api, simplefin
 
     monkeypatch.setattr(gcal, "list_events", lambda days=7: fx.gcal_events())
-    monkeypatch.setattr(gcal, "create_event",
-                        lambda t, s, e, d="": {"id": "ev9", "htmlLink": "https://cal/ev9"})
+    monkeypatch.setattr(
+        gcal, "create_event",
+        lambda t, s, e, d="", rec="": {"id": "ev9", "htmlLink": "https://cal/ev9",
+                                       "recurring": bool(rec)})
     monkeypatch.setattr(gcal, "delete_event", lambda eid: {"deleted": True, "id": eid})
     monkeypatch.setattr(notion_api, "list_open_tasks", lambda: fx.notion_tasks())
     monkeypatch.setattr(notion_api, "create_task",
@@ -199,6 +201,15 @@ CASES: list[tuple[str, str, dict]] = [
         "description": "APMA problem set"}),
     ("create_calendar_event", "unicode title", {"title": "Café con Feid 🎧",
         "start_iso": "2026-07-28T09:00:00-04:00", "end_iso": "2026-07-28T10:00:00-04:00"}),
+    # A semester class is ONE recurring event, not ~45 one-offs. Both RRULE forms
+    # go through the dispatch because the model writes the bare one about half
+    # the time and gcal.create_event repairs it.
+    ("create_calendar_event", "recurring class, RRULE prefix", {"title": "PHIL 2330",
+        "start_iso": "2026-08-25T10:00:00-04:00", "end_iso": "2026-08-25T10:50:00-04:00",
+        "recurrence": "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261209T235959Z"}),
+    ("create_calendar_event", "recurring class, bare FREQ", {"title": "PHIL 2330 discussion",
+        "start_iso": "2026-08-27T14:00:00-04:00", "end_iso": "2026-08-27T14:50:00-04:00",
+        "recurrence": "FREQ=WEEKLY;BYDAY=TH;UNTIL=20261209T235959Z"}),
     ("delete_calendar_event", "by id", {"event_id": "ev1"}),
     ("delete_calendar_event", "with title for preview", {"event_id": "ev1", "title": "Lunch"}),
     ("delete_calendar_event", "long id", {"event_id": "a" * 60}),

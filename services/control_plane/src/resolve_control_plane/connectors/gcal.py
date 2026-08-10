@@ -7,6 +7,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+from typing import Any
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -53,16 +54,43 @@ def list_events(days: int = 7) -> list[dict]:
     return out
 
 
-def create_event(title: str, start_iso: str, end_iso: str, description: str = "") -> dict:
+def create_event(
+    title: str,
+    start_iso: str,
+    end_iso: str,
+    description: str = "",
+    recurrence: str = "",
+) -> dict:
+    """Create an event. ``recurrence`` is an RFC 5545 RRULE for a repeating one.
+
+    Without it a semester-long class had to be booked as ~45 separate one-off
+    events: 45 API calls, 45 rows, and 45 deletions when the room changes.
+    Google takes the whole series as one field, so a class is one event:
+
+        RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261209T235959Z
+
+    ``start_iso``/``end_iso`` are the FIRST meeting; the rule repeats it. UNTIL
+    is UTC and must end in Z. Editing or deleting the returned id hits the whole
+    series, which is the point.
+    """
     svc = _service()
-    body = {
+    body: dict[str, Any] = {
         "summary": title,
         "description": description,
         "start": {"dateTime": start_iso},
         "end": {"dateTime": end_iso},
     }
+    if recurrence:
+        rule = recurrence.strip()
+        # Accept a bare "FREQ=..." too. The model writes it that way about half
+        # the time and Google rejects it without the prefix -- cheaper to repair
+        # here than to lose a turn to a 400.
+        if not rule.upper().startswith("RRULE:"):
+            rule = f"RRULE:{rule}"
+        body["recurrence"] = [rule]
     ev = svc.events().insert(calendarId=os.environ["GOOGLE_CALENDAR_ID"], body=body).execute()
-    return {"id": ev.get("id"), "title": title, "link": ev.get("htmlLink")}
+    return {"id": ev.get("id"), "title": title, "link": ev.get("htmlLink"),
+            "recurring": bool(recurrence)}
 
 
 def delete_event(event_id: str) -> dict:
