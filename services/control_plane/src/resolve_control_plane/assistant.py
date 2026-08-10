@@ -534,8 +534,44 @@ async def rehydrate_pending() -> int:
     return n
 
 # recent (user_text, assistant_reply) exchanges — gives follow-up commands
-# conversational context; process-local, resets on deploy
+# conversational context. Still process-local, but no longer LOST with the
+# process: _rehydrate_history() rebuilds it from agent_events when it's empty.
+# It used to just reset, and on Render that is not a rare event — every deploy
+# and every idle spin-down restarts the process. Mid-conversation that reads as
+# total amnesia: RESOLVE offers three options, you pick one, and the turn that
+# comes back has never heard of them.
 history: deque[tuple[str, str]] = deque(maxlen=8)
+_history_loaded = False
+
+
+def _rehydrate_history() -> None:
+    """Refill `history` from persisted events after a restart. Best-effort: a
+    store hiccup costs context, never the turn."""
+    global _history_loaded
+    if _history_loaded or history:
+        _history_loaded = True
+        return
+    _history_loaded = True  # one attempt per process, success or not
+    try:
+        rows = store.select("agent_events", {
+            "type": "in.(user.message,assistant.reply)",
+            "order": "created_at.desc",
+            "limit": "40",
+        })
+    except Exception:
+        log.warning("history rehydrate failed; starting cold", exc_info=True)
+        return
+    # Oldest-first, then pair each user turn with the reply that followed it. An
+    # unanswered trailing user turn is dropped: the model needs both halves.
+    pending: str | None = None
+    for row in reversed(rows):
+        kind = row.get("type")
+        body = row.get("detail") or row.get("summary") or ""
+        if kind == "user.message":
+            pending = body
+        elif kind == "assistant.reply" and pending is not None:
+            history.append((pending, body))
+            pending = None
 
 
 async def _queue_approval(goal_id: str, tool: str, args: dict[str, Any], risk: str) -> str:
@@ -858,6 +894,9 @@ async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = N
         + (f"\n\n{health_block}" if health_block else "")
     ))
     messages: list[dict[str, Any]] = []
+    # First turn after a restart: pull the conversation back out of the store
+    # before building the prompt, so a deploy mid-exchange isn't amnesia.
+    _rehydrate_history()
     for prior_user, prior_reply in history:
         messages.append({"role": "user", "content": prior_user})
         messages.append({"role": "assistant", "content": prior_reply})
@@ -1072,7 +1111,20 @@ async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = N
         # History keeps a TEXT stand-in for attachments, never the blocks: replaying
         # an image on every later turn would re-bill the same picture up to 8 times.
         # The reply itself describes what was in it, so follow-ups still have context.
-        history.append((f"[sent an attachment] {text}" if blocks else text, final_text))
+        user_turn = f"[sent an attachment] {text}" if blocks else text
+        history.append((user_turn, final_text))
+        # Persist Trav's half too. Only assistant.reply was ever recorded, so the
+        # event log held one side of every conversation and there was nothing to
+        # rebuild the pairs from after a restart. Emitted here rather than at the
+        # top of run_command so the pair lands adjacent and in order even when a
+        # turn takes minutes.
+        # Actor is "core", not "user": NodeId is a closed union in the dashboard
+        # (assistant|planner|executor|coder|reviewer|core + connectors) and an
+        # unknown id is an undefined lookup waiting to happen in the roster.
+        await bus.emit(
+            "core", "user.message", user_turn[:160],
+            detail=user_turn or None, level="info", goal_id=goal_id,
+        )
         await bus.emit(
             "assistant", "assistant.reply", final_text[:160],
             detail=final_text or None, level="success", goal_id=goal_id,
