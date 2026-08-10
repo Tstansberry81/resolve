@@ -145,6 +145,10 @@ export function CommandCore() {
   const phaseRef = useRef<"off" | "listening" | "awaiting" | "speaking">("off");
   const pendingIdRef = useRef<number>(-1);
   const awaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // "a reply is still owed to us" — deliberately OUTLIVES the awaiting phase.
+  // The mic-reopen timeout used to be the only thing tracking this, so a reply
+  // that arrived after it fired was dropped on the floor and never spoken.
+  const owedReplyRef = useRef(false);
   const bargeRef = useRef<SpeechRecognitionLike | null>(null);
   const spokenTextRef = useRef<string>("");
   const eventsRef = useRef(events);
@@ -275,16 +279,22 @@ export function CommandCore() {
       return;
     }
     phaseRef.current = "awaiting";
+    owedReplyRef.current = true;
     pendingIdRef.current = maxEventId();
     engine.submitCommand(heard);
-    // safety: if no reply ever comes back, reopen the mic rather than hang
+    // Safety: reopen the mic rather than hang if a reply never comes. This is
+    // ONLY about the mic — it no longer cancels the reply, because it used to:
+    // at 20s it flipped the phase out of "awaiting", and the reply watcher bailed
+    // on anything that wasn't "awaiting". An Opus 5 turn with tool calls beats
+    // 20s routinely, so the answer came back and was thrown away in silence.
+    // 90s now, and owedReplyRef survives it.
     if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
     awaitTimerRef.current = setTimeout(() => {
       if (phaseRef.current === "awaiting" && activeRef.current) {
         phaseRef.current = "listening";
         openMic();
       }
-    }, 20000);
+    }, 90000);
   };
 
   function openMic() {
@@ -335,6 +345,9 @@ export function CommandCore() {
     if (!voice.active || emergencyStopped) {
       phaseRef.current = "off";
       if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
+      // Voice is off, so no reply is owed any more. Without this the flag would
+      // survive into the next session and speak a stale answer on re-arm.
+      owedReplyRef.current = false;
       stopConvMic();
       stopBargeIn();
       cancelSpeech(); // go quiet the instant voice mode turns off
@@ -356,7 +369,10 @@ export function CommandCore() {
 
   // while awaiting, watch for RESOLVE's reply, speak it, then reopen the mic
   useEffect(() => {
-    if (phaseRef.current !== "awaiting") return;
+    // Gate on "are we owed a reply", not on the mic phase. The phase can have
+    // moved to "listening" while the answer was still being generated; that means
+    // the mic reopened, not that Trav stopped wanting the answer.
+    if (!owedReplyRef.current || !activeRef.current) return;
     let reply: { id: number; text: string } | null = null;
     for (const e of events) {
       if (e.type === "assistant.reply" && e.id > pendingIdRef.current) {
@@ -365,6 +381,10 @@ export function CommandCore() {
     }
     if (!reply) return;
     if (awaitTimerRef.current) clearTimeout(awaitTimerRef.current);
+    owedReplyRef.current = false;
+    // The mic may already be open if the reply outran the reopen timeout — shut
+    // it before speaking so RESOLVE doesn't transcribe her own answer.
+    stopConvMic();
     phaseRef.current = "speaking";
     spokenTextRef.current = reply.text;
     speak(reply.text, {
@@ -478,7 +498,18 @@ export function CommandCore() {
 
   const micActive = listening || voice.active;
 
-  const displayState = voice.active ? "listening" : showDone ? "complete" : orb;
+  // Work beats voice. `voice.active` stays true for the whole voice session --
+  // not just while the mic is open -- so checking it first pinned the orb to
+  // LISTENING through every thinking/executing phase, and the state colors that
+  // already existed were never visible in voice mode.
+  const working = orb === "thinking" || orb === "executing";
+  const displayState = working
+    ? orb
+    : voice.active
+      ? "listening"
+      : showDone
+        ? "complete"
+        : orb;
 
   return (
     <div className="core-v2">

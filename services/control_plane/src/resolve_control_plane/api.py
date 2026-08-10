@@ -159,7 +159,16 @@ async def connector_health(refresh: bool = False) -> dict:
 @app.get("/v1/snapshot", dependencies=[Depends(auth)])
 async def snapshot() -> dict:
     def _load():
-        goals = store.select("goals", {"order": "created_at.desc", "limit": "12"})
+        # Exclude cancelled. Dismissing a mission sets status=cancelled (see
+        # /v1/goals/{id}/dismiss), and without this filter the very next snapshot
+        # handed the card straight back -- the X looked broken because the
+        # optimistic removal was undone 800ms later by the poll. Applies however
+        # the goal got there: dismissed by Trav from any status, or cancelled by
+        # the assistant. Terminal either way, so it doesn't belong in a live feed.
+        goals = store.select(
+            "goals",
+            {"order": "created_at.desc", "limit": "12", "status": "neq.cancelled"},
+        )
         approvals = store.select("approvals", {"order": "created_at.desc", "limit": "8"})
         return goals, approvals
 

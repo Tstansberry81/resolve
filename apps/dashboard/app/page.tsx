@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useEngine, engine } from "@/lib/useEngine";
 import { Starfield } from "@/components/Starfield";
@@ -14,9 +15,36 @@ import { WakeWord } from "@/components/WakeWord";
 import { LocalExecToggle } from "@/components/LocalExecToggle";
 
 function Clock() {
+  // This used to be a bare `new Date()` in the JSX, which is not a clock -- it's
+  // the time of the last React render. It only advanced when something else in
+  // the page re-rendered, so it sat a few minutes behind and drifted further the
+  // longer the tab stayed open.
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    // Align to the next minute boundary before starting the interval. A plain
+    // 60s tick started mid-minute is always up to 59s stale -- which is the same
+    // "a bit off" as before, just less of it.
+    let tick: ReturnType<typeof setInterval> | undefined;
+    const align = setTimeout(
+      () => {
+        setNow(new Date());
+        tick = setInterval(() => setNow(new Date()), 60_000);
+      },
+      60_000 - (Date.now() % 60_000),
+    );
+    return () => {
+      clearTimeout(align);
+      if (tick) clearInterval(tick);
+    };
+  }, []);
+
+  // Blank until mounted: the server's clock isn't Trav's, so rendering a time
+  // during SSR guarantees a hydration mismatch.
   return (
     <span className="clock" suppressHydrationWarning>
-      {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+      {now ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
     </span>
   );
 }
