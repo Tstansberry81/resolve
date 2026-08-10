@@ -28,8 +28,15 @@ def _service():
 MAX_EVENTS = int(os.getenv("GCAL_MAX_EVENTS", "250"))
 
 
-def list_events(days: int = 7) -> list[dict]:
-    """Events in the next ``days``, paginated.
+def list_events(days: int = 7, query: str = "") -> list[dict]:
+    """Events in the next ``days``, paginated. ``query`` is a free-text filter.
+
+    ``query`` exists because scanning is not searching. Asked whether a
+    Philosophy class was on the calendar, the model got a 25-row list with
+    "Philosophy 1730" sitting at row 22, enumerated every other course in that
+    same list correctly, and answered "nothing -- not under PHIL". It was
+    pattern-matching a DEPT-1234 course code against a title spelled out in
+    words. Handing the filter to Google turns a recall problem into a lookup.
 
     This used to ask for a single page of maxResults=25 and return whatever came
     back. Because singleEvents=True expands every recurring event into one row
@@ -63,6 +70,7 @@ def list_events(days: int = 7) -> list[dict]:
                 orderBy="startTime",
                 maxResults=250,
                 pageToken=page_token,
+                **({"q": query} if query else {}),
             )
             .execute()
         )

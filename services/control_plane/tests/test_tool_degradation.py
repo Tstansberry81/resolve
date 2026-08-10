@@ -270,7 +270,7 @@ def test_vault_recall_when_the_rpc_is_missing(monkeypatch):
 def test_numeric_args_never_crash(monkeypatch, bad):
     from resolve_control_plane.connectors import gcal
 
-    monkeypatch.setattr(gcal, "list_events", lambda days=7: {"days": days, "events": []})
+    monkeypatch.setattr(gcal, "list_events", lambda days=7, query="": {"days": days, "events": []})
     kind, out = _call("get_calendar", {"days": bad})
     assert kind == "ok", f"days={bad!r} -> {out}"
     assert isinstance(out["days"], int)

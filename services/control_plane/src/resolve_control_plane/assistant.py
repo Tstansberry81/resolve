@@ -167,7 +167,9 @@ def _arg_list(args: dict[str, Any], key: str) -> list:
 def _connector_call(name: str, args: dict[str, Any],
                     goal_id: str | None = None) -> Any:
     if name == "get_calendar":
-        return gcal.list_events(_arg_int(args, "days", 7, 1, 60))
+        return gcal.list_events(
+            _arg_int(args, "days", 7, 1, 60), str(args.get("query") or "").strip()
+        )
     if name == "create_calendar_event":
         return gcal.create_event(
             args["title"], args["start_iso"], args["end_iso"], args.get("description", ""),

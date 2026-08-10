@@ -85,11 +85,25 @@ TOOLS: list[dict[str, Any]] = [
             "`series_id` is the whole series. Ask for the `days` you actually need: a "
             "class starting three weeks out needs days>=21 or it simply won't be in "
             "the results. If the last row is titled [TRUNCATED], the window held more "
-            "than came back and anything later is missing — narrow `days` and re-ask."
+            "than came back and anything later is missing — narrow `days` and re-ask.\n"
+            "When looking for a SPECIFIC thing, pass `query` instead of scanning the "
+            "list yourself — and search the plain word, not a course code. A class "
+            "titled 'Philosophy 1730' does not match a search for 'PHIL'. If a query "
+            "returns nothing, say the query returned nothing; do not upgrade that into "
+            "'it isn't on the calendar' without an unfiltered look."
         ),
         "input_schema": {
             "type": "object",
-            "properties": {"days": {"type": "integer", "description": "How many days ahead (default 7, max 60)"}},
+            "properties": {
+                "days": {"type": "integer", "description": "How many days ahead (default 7, max 60)"},
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Optional free-text filter over title, description and location. "
+                        "Use the everyday word ('philosophy', 'econ') rather than a code."
+                    ),
+                },
+            },
             "additionalProperties": False,
         },
     },

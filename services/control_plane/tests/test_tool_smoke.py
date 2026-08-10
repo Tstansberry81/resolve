@@ -145,7 +145,7 @@ def _sandbox(monkeypatch):
     from resolve_control_plane import local, vault_index
     from resolve_control_plane.connectors import gcal, gmail_imap, local_llm, notion_api, simplefin
 
-    monkeypatch.setattr(gcal, "list_events", lambda days=7: fx.gcal_events())
+    monkeypatch.setattr(gcal, "list_events", lambda days=7, query="": fx.gcal_events())
     monkeypatch.setattr(
         gcal, "create_event",
         lambda t, s, e, d="", rec="", exc=None, tz="": {
