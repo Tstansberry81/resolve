@@ -56,6 +56,7 @@ export function CommandCore() {
   const [flare, setFlare] = useState(false);
   const [justDone, setJustDone] = useState(false);  // holds a green "COMPLETE" state
   const recRef = useRef<SpeechRecognitionLike | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const activeRef = useRef(false);
   activeRef.current = voice.active;
   const flareSeenRef = useRef<number | null>(null);
@@ -125,8 +126,15 @@ export function CommandCore() {
     rec.continuous = false;
     rec.interimResults = false;
     rec.onresult = (e) => {
-      const heard = e.results[0]?.[0]?.transcript ?? "";
-      if (heard.trim()) engine.submitCommand(heard.trim());
+      const heard = (e.results[0]?.[0]?.transcript ?? "").trim();
+      if (!heard) return;
+      // DICTATION, not a command. This used to call submitCommand() straight
+      // from the transcript, so a misheard word became an executed instruction
+      // with nowhere to catch it. Now it lands in the box to be read, edited and
+      // sent deliberately. Hands-free end-to-end is still the wake word's job.
+      // Appends rather than replaces so you can dictate in more than one go.
+      setText((prev) => (prev.trim() ? `${prev.trim()} ${heard}` : heard));
+      inputRef.current?.focus();
     };
     rec.onend = () => setListening(false);
     setListening(true);
@@ -540,8 +548,8 @@ export function CommandCore() {
       <div className="command-bar">
         <button
           className="mic"
-          title={micActive ? "Listening — tap to stop" : "Speak a command"}
-          aria-label="Voice command"
+          title={micActive ? "Listening — tap to stop" : "Dictate into the box (say it, then edit and send)"}
+          aria-label="Dictate"
           disabled={emergencyStopped}
           style={micActive ? { color: "#35e39c" } : undefined}
           onClick={toggleMic}
@@ -553,6 +561,7 @@ export function CommandCore() {
           </svg>
         </button>
         <input
+          ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
