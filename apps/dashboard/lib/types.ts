@@ -28,13 +28,15 @@ export type NodeId = AgentId | ConnectorId;
 
 export type OrbState = "idle" | "listening" | "thinking" | "executing" | "waiting";
 
+// Mirrors GoalStatus in services/control_plane/domain.py — keep the two in step.
 export type GoalStatus =
   | "planning"
   | "active"
   | "waiting_approval"
   | "paused"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type RiskClass =
   | "read"

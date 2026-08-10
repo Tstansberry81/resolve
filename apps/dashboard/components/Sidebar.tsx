@@ -7,14 +7,29 @@ import type { AgentEvent, Goal, GoalStatus } from "@/lib/types";
 // Left rail: Missions as a dropdown section (open by default), and beneath it
 // the Event log dropdown — fully hidden until clicked, per spec.
 
-const STATUS_META: Record<GoalStatus, { label: string; tone: string }> = {
+type StatusMeta = { label: string; tone: string };
+
+const STATUS_META: Record<GoalStatus, StatusMeta> = {
   planning: { label: "planning", tone: "blue" },
   active: { label: "active", tone: "cyan" },
   waiting_approval: { label: "needs you", tone: "amber" },
   paused: { label: "paused", tone: "red" },
   completed: { label: "done", tone: "green" },
   failed: { label: "failed", tone: "red" },
+  cancelled: { label: "cancelled", tone: "red" },
 };
+
+// The control plane owns goal status. If it ever emits one this file hasn't
+// learned yet, label it plainly rather than handing undefined to the renderer:
+// a missing key here used to throw on `meta.tone` and take the whole dashboard
+// down with "a client-side exception has occurred". "cancelled" did exactly
+// that. Widening GoalStatus keeps the Record exhaustive so the next addition is
+// a compile error; this lookup is the runtime backstop for a live backend that
+// ships ahead of the client.
+function statusMeta(status: string): StatusMeta {
+  const table = STATUS_META as Record<string, StatusMeta | undefined>;
+  return table[status] ?? { label: status, tone: "blue" };
+}
 
 const ORDER: GoalStatus[] = [
   "waiting_approval",
@@ -23,7 +38,14 @@ const ORDER: GoalStatus[] = [
   "paused",
   "completed",
   "failed",
+  "cancelled",
 ];
+
+// unranked (unknown) statuses sort last instead of jumping the queue on -1
+function rank(status: GoalStatus): number {
+  const i = ORDER.indexOf(status);
+  return i === -1 ? ORDER.length : i;
+}
 
 const LEVEL_GLYPH: Record<AgentEvent["level"], string> = {
   info: "•",
@@ -43,7 +65,7 @@ function ago(ts: number, now: number): string {
 }
 
 function MissionCard({ goal }: { goal: Goal }) {
-  const meta = STATUS_META[goal.status];
+  const meta = statusMeta(goal.status);
   const pct = Math.round(goal.progress * 100);
   return (
     <article className="mission" data-status={goal.status}>
@@ -102,7 +124,7 @@ function EventRow({ ev, now }: { ev: AgentEvent; now: number }) {
       className={`tl-row tl-${ev.level} ${ev.detail ? "tl-expandable" : ""}`}
       onClick={() => ev.detail && setOpen((o) => !o)}
     >
-      <span className="tl-glyph">{LEVEL_GLYPH[ev.level]}</span>
+      <span className="tl-glyph">{LEVEL_GLYPH[ev.level] ?? "•"}</span>
       <div className="tl-body">
         <div className="tl-line">
           <span className="tl-actor">{ev.actor}</span>
@@ -122,7 +144,7 @@ export function Sidebar() {
   const now = Date.now();
 
   const sorted = [...goals].sort(
-    (a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status),
+    (a, b) => rank(a.status) - rank(b.status),
   );
   const live = goals.filter(
     (g) => g.status === "active" || g.status === "waiting_approval",
