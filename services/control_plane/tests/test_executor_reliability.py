@@ -249,8 +249,15 @@ class ModelLabelTest(unittest.TestCase):
         self.assertEqual(executor.model_label(""), "model")
 
     def test_roster_reports_every_role(self):
+        # Must match the five ids in apps/dashboard/lib/roster.ts. A role missing
+        # here doesn't error — the constellation quietly renders that node's
+        # hardcoded fallback string instead, which is how the UI once showed
+        # Haiku for a Sonnet executor. coder/reviewer were absent until
+        # 2026-08-10; a sixth node belongs in both places or neither.
         roster = executor.model_roster()
-        self.assertEqual(set(roster), {"assistant", "planner", "executor"})
+        self.assertEqual(
+            set(roster), {"assistant", "planner", "executor", "coder", "reviewer"}
+        )
         self.assertTrue(all(roster.values()))
 
     def test_roster_reports_local_when_the_toggle_is_on(self):

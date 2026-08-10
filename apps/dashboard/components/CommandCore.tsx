@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine, useEngine } from "@/lib/useEngine";
+import { modelLabel } from "@/lib/roster";
 import {
   cancelSpeech,
   isMobile,
@@ -47,7 +48,8 @@ function spokenBrief(md: string): string {
 }
 
 export function CommandCore() {
-  const { orb, orbCaption, emergencyStopped, events, morningBrief } = useEngine();
+  const { orb, orbCaption, emergencyStopped, events, morningBrief, modelsByRole } =
+    useEngine();
   const voice = useSyncExternalStore(subscribeVoice, getVoice, () => EMPTY_VOICE);
   const [text, setText] = useState("");
   const [listening, setListening] = useState(false);
@@ -526,7 +528,7 @@ export function CommandCore() {
           placeholder={
             emergencyStopped
               ? "Execution halted — resume to issue commands"
-              : "Tell Sonnet what you need…"
+              : `Tell ${modelLabel(modelsByRole.assistant)} what you need…`
           }
           disabled={emergencyStopped}
           aria-label="Command input"

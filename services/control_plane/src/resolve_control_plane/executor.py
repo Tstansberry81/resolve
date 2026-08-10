@@ -183,10 +183,18 @@ def model_label(model_id: str) -> str:
 # Public roster of what each role actually runs — the dashboard reads this via
 # /v1/snapshot instead of hardcoding model names in the frontend roster.
 def model_roster() -> dict[str, str]:
+    """Every constellation node's live model. Must cover all five ids in the
+    dashboard roster (assistant/planner/executor/coder/reviewer) — a role missing
+    here silently falls back to the hardcoded string in lib/roster.ts, which is
+    how the UI once claimed Haiku while the backend ran Sonnet. Coder and reviewer
+    were missing until 2026-08-10 and had been showing fallbacks the whole time.
+    """
     from .assistant import ASSISTANT_MODEL
+    from .coder import architect_model, reviewer_model
 
     return {"assistant": ASSISTANT_MODEL, "planner": PLANNER_MODEL,
-            "executor": "local Qwen" if local_exec else EXECUTOR_MODEL}
+            "executor": "local Qwen" if local_exec else EXECUTOR_MODEL,
+            "coder": architect_model(), "reviewer": reviewer_model()}
 
 
 def _cloud_label() -> str:

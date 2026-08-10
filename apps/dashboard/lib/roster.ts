@@ -58,6 +58,23 @@ export const AGENT_META: Record<string, AgentMeta> = Object.fromEntries(
   AGENTS.map((a) => [a.id, a]),
 );
 
+/**
+ * "claude-opus-5" -> "Opus", "local Qwen" -> "Qwen". UI copy addresses the model
+ * by family, and typing that name by hand is what let the command box say "Tell
+ * Sonnet what you need" for months while the assistant ran Opus 5. Derive it from
+ * the live id in state.modelsByRole; never hardcode it again.
+ */
+export function modelLabel(model: string | undefined): string {
+  if (!model) return "RESOLVE";
+  const m = model.toLowerCase();
+  if (m.includes("opus")) return "Opus";
+  if (m.includes("sonnet")) return "Sonnet";
+  if (m.includes("haiku")) return "Haiku";
+  if (m.includes("fable")) return "Fable";
+  if (m.includes("qwen")) return "Qwen";
+  return model;
+}
+
 export const CONNECTORS: { id: ConnectorId; label: string }[] = [
   { id: "vault", label: "Vault" },
   { id: "gmail", label: "Gmail" },
