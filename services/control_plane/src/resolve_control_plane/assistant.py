@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 import anyio
 
-from . import artifacts, bus, costs, executor, store
+from . import artifacts, bus, config, costs, executor, store
 from .connectors import composio, gcal, gmail_imap, local_llm, notion_api, simplefin, vault_github
 from .domain import AutonomyMode
 from .policy import PolicyDecision, evaluate_tool_call
@@ -36,6 +36,16 @@ log = logging.getLogger("resolve.assistant")
 # truncates mid-answer. Every max_tokens in this repo was re-checked for that.
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-opus-5")
 MAX_TURNS = 8
+
+# Effort was never sent, so every turn ran at Opus 5's `high` default. This is the
+# assistant's cost lever: it can't drop to Haiku (it carries the whole
+# conversation plus 54 tool schemas, and Haiku 4.5 caps at 200K against Opus 5's
+# 1M), but it can think less per turn. `medium` because low/medium are unusually
+# strong on Opus 5; raise it back with the env var if answers get shallow.
+_ASSISTANT_EFFORT = config.effort_for(ASSISTANT_MODEL, os.getenv("ASSISTANT_EFFORT", "medium"))
+ASSISTANT_OUTPUT_CONFIG: dict[str, Any] = (
+    {"output_config": _ASSISTANT_EFFORT} if _ASSISTANT_EFFORT else {}
+)
 
 # Anthropic's server-side web search, now available to the ASSISTANT and not just
 # the background executor. This is a cost fix as much as a capability one: without
@@ -884,6 +894,7 @@ async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = N
                 system=system,
                 tools=active_tools,
                 messages=messages,
+                **ASSISTANT_OUTPUT_CONFIG,
             )
             costs.record("assistant", ASSISTANT_MODEL, resp.usage)
             # A server-side tool (web search) hit its internal iteration limit

@@ -52,10 +52,23 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(result.decision, PolicyDecision.ALLOW)
 
     def test_model_route_is_config_driven(self):
-        route = model_choice("coding_implementer", config_dir=CONFIG)
+        # Was pinned to coding_implementer, which was removed on 2026-08-10 — no
+        # cloud model ever implemented anything (the laptop worker does), so the
+        # route was config with no call site. Repointed at a route coder.py
+        # actually reads, so this still tests config-driven routing.
+        route = model_choice("coding_architect", config_dir=CONFIG)
         self.assertEqual(route.provider, "anthropic")
-        self.assertEqual(route.model, "claude-opus-4-8")
+        self.assertEqual(route.model, "claude-opus-5")
         self.assertEqual(route.reasoning, "high")
+
+    def test_removed_routes_stay_removed(self):
+        # The nine deleted roles were decoration: config entries with no importer.
+        # If one comes back, it needs a call site in the same commit.
+        for dead in ("coding_implementer", "general_assistant", "route_and_classify",
+                     "research_synthesis", "vision_and_documents",
+                     "high_stakes_evaluator", "realtime_voice"):
+            with self.assertRaises(KeyError, msg=dead):
+                model_choice(dead, config_dir=CONFIG)
 
     def test_new_read_actions_allowed_in_execute_mode(self):
         for action in ("calendar.read", "notion.tasks.read", "email.read"):

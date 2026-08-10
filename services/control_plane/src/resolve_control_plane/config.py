@@ -27,6 +27,34 @@ class ModelChoice:
     reasoning: str
 
 
+# Effort (output_config.effort) is how thinking depth -- and so most of the
+# output-token bill -- gets controlled on current models. It is NOT universal:
+# Haiku 4.5 predates the parameter and rejects it, so a blanket pass-through would
+# 400 every executor and ingest call. Omitting it means the model's own default,
+# which is `high` on Opus 5 -- that default is why the `reasoning` field sat in
+# model_routes.json for months while every call silently ran flat out.
+_EFFORT_MODELS = (
+    "claude-opus-5", "claude-sonnet-5", "claude-fable-5",
+    "claude-opus-4-8", "claude-opus-4-7",
+)
+_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+
+def effort_for(model: str, reasoning: str) -> dict[str, Any] | None:
+    """The ``output_config`` for a call, or None when it must be omitted.
+
+    None for "none"/unknown levels and for models that don't take the parameter,
+    so callers can splat it unconditionally without a branch:
+
+        **({"output_config": oc} if (oc := effort_for(m, r)) else {})
+    """
+    if reasoning not in _EFFORT_LEVELS:
+        return None
+    if not model.startswith(_EFFORT_MODELS):
+        return None
+    return {"effort": reasoning}
+
+
 def model_choice(role: str, config_dir: Path | None = None, fallback: bool = False) -> ModelChoice:
     routes = load_json("model_routes.json", config_dir)["routes"]
     if role not in routes:

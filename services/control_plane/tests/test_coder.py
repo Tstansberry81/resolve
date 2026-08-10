@@ -10,12 +10,13 @@ from resolve_control_plane import assistant, coder
 
 
 def test_uses_the_configured_coding_routes(monkeypatch):
-    """These three routes sat unread in model_routes.json since day one — the
-    point of this module is that they're now load-bearing."""
+    """These routes sat unread in model_routes.json since day one — the point of
+    this module is that they're now load-bearing. Pinned to the config's current
+    values, so a route edit has to come here too rather than drifting silently."""
     monkeypatch.delenv("CODER_ARCHITECT_MODEL", raising=False)
     monkeypatch.delenv("CODER_REVIEWER_MODEL", raising=False)
-    assert coder.architect_model() == "claude-opus-4-8"
-    assert coder.reviewer_model() == "claude-opus-4-8"
+    assert coder.architect_model() == "claude-opus-5"
+    assert coder.reviewer_model() == "claude-opus-5"
 
 
 def test_env_overrides_the_route(monkeypatch):
@@ -29,7 +30,7 @@ def test_a_broken_config_does_not_kill_a_coding_request(monkeypatch):
 
     monkeypatch.delenv("CODER_ARCHITECT_MODEL", raising=False)
     monkeypatch.setattr(coder, "model_choice", boom)
-    assert coder.architect_model() == "claude-opus-4-8"
+    assert coder.architect_model() == "claude-opus-5"
 
 
 def test_reviewer_is_told_it_did_not_write_the_code():

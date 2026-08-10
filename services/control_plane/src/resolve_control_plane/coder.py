@@ -49,11 +49,11 @@ def _model(role: str, default: str) -> str:
 
 
 def architect_model() -> str:
-    return os.getenv("CODER_ARCHITECT_MODEL") or _model("coding_architect", "claude-opus-4-8")
+    return os.getenv("CODER_ARCHITECT_MODEL") or _model("coding_architect", "claude-opus-5")
 
 
 def reviewer_model() -> str:
-    return os.getenv("CODER_REVIEWER_MODEL") or _model("code_reviewer", "claude-opus-4-8")
+    return os.getenv("CODER_REVIEWER_MODEL") or _model("code_reviewer", "claude-opus-5")
 
 
 ARCHITECT_SYSTEM = """You are RESOLVE's coding architect. You do NOT write the final code —

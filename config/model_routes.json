@@ -1,47 +1,39 @@
 {
-  "verified_on": "2026-07-26",
+  "verified_on": "2026-08-10",
   "policy": {
     "pin_models_in_production": true,
     "allow_preview_models": false,
     "max_fallbacks": 1,
-    "independent_evaluator_family": true
+    "independent_evaluator_family": false
   },
+  "_shape": [
+    "One entry per role the code actually reads. Nine roles were deleted on",
+    "2026-08-10 because nothing imported them -- they described an architecture",
+    "that was never wired. If you add a role here, add the call site in the same",
+    "commit or it is decoration again.",
+    "",
+    "The live model for assistant/planner/executor/ingest comes from an ENV VAR",
+    "(ASSISTANT_MODEL, PLANNER_MODEL, EXECUTOR_MODEL, INGEST_MODEL) whose default",
+    "matches the 'model' below. Retuning cost on Render is an env-var edit with no",
+    "deploy; this file is the checked-in default and the documentation of intent.",
+    "",
+    "'reasoning' maps to output_config.effort. It is skipped automatically on",
+    "models that predate the parameter (Haiku 4.5 rejects it) -- see",
+    "config.effort_for()."
+  ],
   "routes": {
-    "route_and_classify": {
-      "primary": {
-        "provider": "openai",
-        "model": "gpt-5.6-luna",
-        "reasoning": "none"
-      },
-      "fallback": {
-        "provider": "anthropic",
-        "model": "claude-haiku-4-5",
-        "reasoning": "none"
-      }
-    },
-    "extract_and_summarize": {
-      "primary": {
-        "provider": "anthropic",
-        "model": "claude-haiku-4-5",
-        "reasoning": "low"
-      },
-      "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.6-luna",
-        "reasoning": "low"
-      }
-    },
-    "general_assistant": {
+    "assistant": {
       "primary": {
         "provider": "anthropic",
         "model": "claude-opus-5",
-        "reasoning": "high"
+        "reasoning": "medium"
       },
       "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.6-terra",
+        "provider": "anthropic",
+        "model": "claude-sonnet-5",
         "reasoning": "medium"
-      }
+      },
+      "_note": "The Telegram front door: full history, 54 tool schemas, vision. The one role that CANNOT drop to Haiku -- it inherits the whole context, and Haiku 4.5 caps at 200K against Opus 5's 1M. Effort is the cost lever here, not the model."
     },
     "goal_planner": {
       "primary": {
@@ -51,101 +43,83 @@
       },
       "fallback": {
         "provider": "anthropic",
-        "model": "claude-opus-4-8",
+        "model": "claude-sonnet-5",
         "reasoning": "high"
-      }
+      },
+      "_note": "Reads full context and emits self-contained steps. Stays on Opus at high effort on purpose: every downstream Haiku step is only as good as the instructions written here, so this is the wrong place to save money."
+    },
+    "executor": {
+      "primary": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5",
+        "reasoning": "medium"
+      },
+      "fallback": {
+        "provider": "anthropic",
+        "model": "claude-opus-5",
+        "reasoning": "medium"
+      },
+      "_note": [
+        "NOT Haiku, and that is load-bearing -- see the comment at executor.py:33.",
+        "This route already ran on Haiku for cost and regressed three ways:",
+        "narrate-instead-of-deliver stalls, 'let me compile this' tails, and a",
+        "turn truncated mid-tool_use that 400'd a whole plan.",
+        "",
+        "The reason is that the executor is not the thin worker its name suggests.",
+        "Its INPUT is small (executor.py queues instructions + objective, not the",
+        "conversation) -- but it then loads all 54 tool schemas plus server-side",
+        "web search and runs up to MAX_STEP_TURNS + 3 turns per step. That is a",
+        "small-input agent loop, not a single cheap call, and it is the loop that",
+        "the cheap tier failed at.",
+        "",
+        "Cost lever here is effort (now actually wired), not the model tier."
+      ]
+    },
+    "ingest": {
+      "primary": {
+        "provider": "anthropic",
+        "model": "claude-haiku-4-5",
+        "reasoning": "none"
+      },
+      "fallback": null,
+      "_note": "Vault ingest. Bulk, mechanical, already Haiku."
     },
     "research": {
       "primary": {
-        "provider": "openai",
-        "model": "gpt-5.6-terra",
+        "provider": "anthropic",
+        "model": "claude-sonnet-5",
         "reasoning": "medium"
       },
       "fallback": {
         "provider": "anthropic",
-        "model": "claude-sonnet-4-6",
-        "reasoning": "medium"
-      }
-    },
-    "research_synthesis": {
-      "primary": {
-        "provider": "openai",
-        "model": "gpt-5.6-sol",
-        "reasoning": "high"
-      },
-      "fallback": {
-        "provider": "anthropic",
-        "model": "claude-opus-4-8",
-        "reasoning": "high"
+        "model": "claude-haiku-4-5",
+        "reasoning": "none"
       }
     },
     "coding_architect": {
       "primary": {
         "provider": "anthropic",
-        "model": "claude-opus-4-8",
+        "model": "claude-opus-5",
         "reasoning": "high"
       },
       "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.6-sol",
-        "reasoning": "high"
-      }
-    },
-    "coding_implementer": {
-      "primary": {
         "provider": "anthropic",
-        "model": "claude-opus-4-8",
-        "reasoning": "high"
-      },
-      "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.3-codex",
+        "model": "claude-sonnet-5",
         "reasoning": "high"
       }
     },
     "code_reviewer": {
       "primary": {
         "provider": "anthropic",
-        "model": "claude-opus-4-8",
+        "model": "claude-opus-5",
         "reasoning": "high"
       },
       "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.6-sol",
-        "reasoning": "high"
-      }
-    },
-    "vision_and_documents": {
-      "primary": {
         "provider": "anthropic",
-        "model": "claude-sonnet-4-6",
-        "reasoning": "medium"
-      },
-      "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.6-terra",
-        "reasoning": "medium"
-      }
-    },
-    "high_stakes_evaluator": {
-      "primary": {
-        "provider": "anthropic",
-        "model": "claude-opus-4-8",
+        "model": "claude-sonnet-5",
         "reasoning": "high"
       },
-      "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.6-sol",
-        "reasoning": "high"
-      }
-    },
-    "realtime_voice": {
-      "primary": {
-        "provider": "openai",
-        "model": "gpt-realtime-1.5",
-        "reasoning": "low"
-      },
-      "fallback": null
+      "_note": "Reads a diff in a fresh context to catch what the implementer missed. Downgrading this is a false saving -- a missed bug costs more than the tokens."
     },
     "embeddings": {
       "primary": {
@@ -153,19 +127,8 @@
         "model": "text-embedding-3-small",
         "reasoning": "none"
       },
-      "fallback": null
-    },
-    "executor": {
-      "primary": {
-        "provider": "anthropic",
-        "model": "claude-sonnet-5",
-        "reasoning": "high"
-      },
-      "fallback": {
-        "provider": "openai",
-        "model": "gpt-5.6-sol",
-        "reasoning": "high"
-      }
+      "fallback": null,
+      "_note": "The one surviving OpenAI dependency: Anthropic ships no embedding model, so vault_recall's pgvector index has nowhere else to go. Every other OpenAI route was removed on 2026-08-10."
     }
   }
 }
