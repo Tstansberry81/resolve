@@ -96,15 +96,33 @@ def _is_stop(text: str) -> bool:
 # it promises ("creating it now") or falsely claims completion ("Done."). Either
 # is a lie if no tool ran. We detect both, plus whether the user's request was
 # actionable at all — if it was and nothing ran, that alone is enough to nudge.
+# Does the reply claim work was done THIS TURN? The verbs must be attached to a
+# first-person subject or stand alone as an announcement.
+#
+# This used to match bare verbs -- creating|building|generated|saved|here's the --
+# anywhere in the reply. That is fine until the reply is ABOUT something that
+# creates things. Asked to explain a shell script, RESOLVE wrote "this creates a
+# venv ... then builds the DMG", the regex read it as a false claim, and the
+# STOP nudge fired on a turn where nothing was ever supposed to happen. Worse,
+# the model then argued with the nudge in front of Trav: "Fair cop on the rule,
+# but there was nothing to create here." Describing an action is not claiming it.
+# \w* not \w+ on stems that are already whole words: "I'll add that" has to
+# match on bare "add", and \w+ silently required a suffix.
+_DID = (r"creat\w*|mad\w*|add\w*|sen[dt]\w*|sav\w*|schedul\w*|updat\w*|"
+        r"delet\w*|remov\w*|draft\w*|buil[dt]\w*|generat\w*|post\w*|put|set up|"
+        r"done|finish\w*|complet\w*")
 _CLAIM_RE = re.compile(
-    r"\b(creating|making|building|setting up|working on|generating|drafting|"
-    r"putting together|pulling (?:that|it) up|i'?ll|i will|let me|give me a|"
-    r"one (?:sec|second|moment)|on it|hang on|hold on|getting (?:that|it)|"
-    r"will (?:create|make|do|set|send|add|update|draft|delete|find|check)|"
-    r"done|all set|created|made it|added|scheduled|sent|saved|posted|updated|"
-    r"deleted|removed|finished|completed|drafted|generated|ready|is live|"
-    r"here'?s (?:the|your|a)|i'?ve (?:created|made|added|sent|set|saved|scheduled|"
-    r"updated|deleted|drafted|built|put|generated|done))\b",
+    r"(?:"
+    # "I've created…", "I'll add…", "I am generating…", "I just saved…"
+    rf"\bi'?(?:ve|ll|m|d)?\s+(?:just\s+|already\s+)?(?:will\s+|going to\s+)?(?:{_DID})\b"
+    # bare stallers — inherently about this turn, no subject needed
+    r"|\b(?:let me|on it|hang on|hold on|one (?:sec|second|moment)|give me a|"
+    r"working on it|getting (?:that|it)|pulling (?:that|it) up)\b"
+    # a completion announcement standing alone: line starts with it
+    rf"|(?:\A|\n)\s*(?:{_DID}|all set|ready|is live)\b"
+    # "Here's your doc" / "Here's the file" — handing over a made thing
+    r"|\bhere'?s (?:your|the) (?:doc|file|note|draft|event|task|page|link)\b"
+    r")",
     re.I,
 )
 _ACTIONABLE_RE = re.compile(
@@ -984,7 +1002,13 @@ async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = N
                         "'Created', 'Here's your…') or that you're about to — you have real "
                         "tools, so CALL the tool now to actually do it, or ask one specific "
                         "clarifying question. Only answer once it's truly done, with the real "
-                        "result from the tool."})
+                        "result from the tool.\n\n"
+                        "This message is internal. Do not mention it, quote it, apologise for "
+                        "it, or explain to Trav why you did or didn't create something — he "
+                        "cannot see it and it reads as arguing with yourself. If it fired on a "
+                        "turn where nothing was meant to be created (you were explaining, "
+                        "summarising or answering a question), just give the answer again, "
+                        "plainly, with no preamble about rules."})
                     continue
                 break
 
