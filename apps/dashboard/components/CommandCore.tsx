@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine, useEngine } from "@/lib/useEngine";
 import { modelLabel } from "@/lib/roster";
+import type { Attachment } from "@/lib/types";
 import {
   cancelSpeech,
   isMobile,
@@ -95,11 +96,43 @@ export function CommandCore() {
   const busyNow = orb === "executing" || orb === "thinking" || voice.active;
   const showDone = justDone && !busyNow;
 
+  // Attachments staged for the next send. Kept as base64 up front rather than
+  // held as File handles and read at submit time: reading is async, and a send
+  // that has to await a FileReader can race the input clearing.
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const addFiles = async (picked: FileList | null) => {
+    if (!picked?.length) return;
+    const read = await Promise.all(
+      Array.from(picked).map(
+        (f) =>
+          new Promise<Attachment | null>((resolve) => {
+            const r = new FileReader();
+            r.onerror = () => resolve(null);
+            r.onload = () => {
+              // strip the "data:<mime>;base64," prefix — the control plane
+              // b64decodes the value as-is and chokes on the header.
+              const s = String(r.result ?? "");
+              const b64 = s.slice(s.indexOf(",") + 1);
+              resolve(b64 ? { name: f.name, mime: f.type, data: b64 } : null);
+            };
+            r.readAsDataURL(f);
+          }),
+      ),
+    );
+    // Cap at 10 here too. The control plane enforces it regardless, but silently
+    // uploading 30MB that the server will drop is a waste of Trav's bandwidth.
+    setAttachments((prev) => [...prev, ...read.filter((a): a is Attachment => !!a)].slice(0, 10));
+  };
+
   const submit = () => {
     const t = text.trim();
-    if (!t || emergencyStopped) return;
-    engine.submitCommand(t);
+    // An attachment with no caption is a real turn — "look at this" is implied.
+    if ((!t && attachments.length === 0) || emergencyStopped) return;
+    engine.submitCommand(t, attachments);
     setText("");
+    setAttachments([]);
   };
 
   // Push-to-talk (one-shot) — and, in voice-conversation mode, a guaranteed
@@ -560,6 +593,28 @@ export function CommandCore() {
             <path d="M12 18v3" />
           </svg>
         </button>
+        <button
+          className="clip"
+          title="Attach images, PDFs or text files"
+          aria-label="Attach files"
+          disabled={emergencyStopped}
+          onClick={() => fileRef.current?.click()}
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf,text/*,application/json,application/xml"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            void addFiles(e.target.files);
+            e.target.value = ""; // so picking the same file twice still fires
+          }}
+        />
         <input
           ref={inputRef}
           value={text}
@@ -577,6 +632,22 @@ export function CommandCore() {
           RUN
         </button>
       </div>
+      {attachments.length > 0 && (
+        <div className="attach-row">
+          {attachments.map((a, i) => (
+            <span className="attach-chip" key={`${a.name}-${i}`}>
+              {a.name}
+              <button
+                aria-label={`Remove ${a.name}`}
+                title="Remove"
+                onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

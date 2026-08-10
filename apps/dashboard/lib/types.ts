@@ -63,6 +63,14 @@ export interface Goal {
 
 export type EventLevel = "info" | "success" | "warn" | "error" | "approval";
 
+/** A file on its way to the assistant. `data` is base64 WITHOUT the data: URL
+ *  prefix — the control plane feeds it straight to b64decode. */
+export interface Attachment {
+  name: string;
+  mime: string;
+  data: string;
+}
+
 export interface AgentEvent {
   id: number;
   ts: number; // epoch ms

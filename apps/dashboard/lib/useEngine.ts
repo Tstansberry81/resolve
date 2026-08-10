@@ -11,7 +11,7 @@
 
 import { useSyncExternalStore } from "react";
 import { LiveEngine, OFFLINE_STATE } from "./liveEngine";
-import type { EngineState } from "./types";
+import type { Attachment, EngineState } from "./types";
 
 const listeners = new Set<() => void>();
 let live: LiveEngine | null = null;
@@ -27,7 +27,8 @@ function ensure(): LiveEngine {
 
 export const engine = {
   decideApproval: (id: string, d: "approved" | "rejected") => live?.decideApproval(id, d),
-  submitCommand: (t: string) => live?.submitCommand(t),
+  submitCommand: (t: string, attachments: Attachment[] = []) =>
+    live?.submitCommand(t, attachments),
   dismissGoal: (id: string) => live?.dismissGoal(id),
   emergencyStop: () => live?.emergencyStop(),
   resume: () => live?.resume(),

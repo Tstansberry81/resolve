@@ -6,13 +6,16 @@ import json
 import datetime as dt
 import os
 import time
+from typing import Any
 
 import anyio
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import __version__, artifacts, audit, bus, costs, executor, health, local, routines, store
+from . import (
+    __version__, artifacts, audit, bus, costs, executor, health, local, media, routines, store,
+)
 from .connectors import local_llm, simplefin
 from .assistant import (
     CONNECTOR_AVAILABLE, decide_approval, pending_actions, queue_status, run_command,
@@ -256,19 +259,45 @@ async def events() -> StreamingResponse:
     )
 
 
+class Upload(BaseModel):
+    name: str
+    mime: str = ""
+    data: str  # base64
+
+
 class CommandBody(BaseModel):
     text: str
+    attachments: list[Upload] = []
 
 
 @app.post("/v1/command", dependencies=[Depends(auth)])
 async def command(body: CommandBody) -> dict:
     text = body.text.strip()
-    if not text:
+    atts = body.attachments or []
+    # Text was required because the dashboard could only ever send text. With a
+    # paperclip, "look at this" with a screenshot and no caption is a real turn.
+    if not text and not atts:
         raise HTTPException(status_code=400, detail="empty command")
     if not os.getenv("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
-    goal_id = await run_command(text)
-    return {"ok": True, "goalId": goal_id}
+
+    blocks: list[dict[str, Any]] = []
+    if atts:
+        # Decoding is CPU work on multi-MB payloads; off the event loop so one
+        # upload doesn't stall the SSE stream every other client is reading.
+        blocks, notes = await anyio.to_thread.run_sync(
+            lambda: media.blocks_from_uploads([a.model_dump() for a in atts])
+        )
+        if notes:
+            # Skipped or unreadable files are stated in the turn itself rather
+            # than swallowed — silence here reads as "it looked and saw nothing".
+            text = (text + "\n\n" + "\n".join(notes)).strip()
+        if not blocks and not body.text.strip():
+            raise HTTPException(status_code=400,
+                                detail="; ".join(notes) or "no readable attachments")
+
+    goal_id = await run_command(text, blocks or None)
+    return {"ok": True, "goalId": goal_id, "attachments": len(blocks)}
 
 
 @app.post("/v1/health", dependencies=[Depends(auth)])

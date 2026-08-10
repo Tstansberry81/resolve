@@ -475,6 +475,7 @@ body::before {
 }
 
 .command-bar .mic,
+.command-bar .clip,
 .command-bar .send {
   border: none;
   cursor: pointer;
@@ -482,7 +483,8 @@ body::before {
   transition: all 0.18s var(--ease-out);
 }
 
-.command-bar .mic {
+.command-bar .mic,
+.command-bar .clip {
   display: grid;
   place-items: center;
   width: 30px;
@@ -491,7 +493,24 @@ body::before {
   background: var(--glass-strong);
 }
 
-.command-bar .mic:hover { color: var(--violet); }
+.command-bar .mic:hover,
+.command-bar .clip:hover { color: var(--violet); }
+.command-bar .clip:disabled { opacity: 0.4; cursor: default; }
+
+/* Staged attachments, under the command bar so the input never shifts. */
+.attach-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; padding: 0 6px; }
+.attach-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 240px; padding: 3px 8px; border-radius: 999px;
+  background: var(--glass-strong); color: var(--text-1);
+  font-size: 11px; letter-spacing: 0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.attach-chip button {
+  border: none; background: none; cursor: pointer;
+  color: var(--text-2); font-size: 11px; line-height: 1; padding: 0;
+}
+.attach-chip button:hover { color: var(--red, #ff6b6b); }
 
 .command-bar .send {
   font-family: var(--font-ui);

@@ -10,6 +10,7 @@ import type {
   AgentEvent,
   Approval,
   Artifact,
+  Attachment,
   ConnectorHealth,
   EngineState,
   Vitals,
@@ -222,11 +223,13 @@ export class LiveEngine {
     this.commit({ goals: this.state.goals.filter((g) => g.id !== id) });
   };
 
-  submitCommand = (text: string) => {
+  submitCommand = (text: string, attachments: Attachment[] = []) => {
     void fetch("/api/cp/v1/command", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      // `attachments` omitted entirely when empty — the control plane defaults
+      // it, and an empty array on every turn is noise in the request log.
+      body: JSON.stringify(attachments.length ? { text, attachments } : { text }),
     }).then(() => setTimeout(() => void this.loadSnapshot(), 1500));
   };
 

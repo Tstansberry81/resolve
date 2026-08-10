@@ -187,42 +187,106 @@ def to_blocks(atts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[st
     for att in atts:
         try:
             raw = download(att["file_id"])
-            kind, mime = att["kind"], att.get("mime") or ""
-
-            if kind == "voice":
-                notes.append(f'Voice note, transcribed: "{transcribe(raw, att["name"])}"')
-                continue
-
-            if kind == "photo" or mime in IMAGE_TYPES:
-                blocks.append({
-                    "type": "image",
-                    "source": {"type": "base64",
-                               "media_type": mime if mime in IMAGE_TYPES else DEFAULT_PHOTO_MIME,
-                               "data": base64.b64encode(raw).decode("ascii")},
-                })
-                continue
-
-            if mime == "application/pdf":
-                blocks.append({
-                    "type": "document",
-                    "source": {"type": "base64", "media_type": "application/pdf",
-                               "data": base64.b64encode(raw).decode("ascii")},
-                })
-                continue
-
-            # Plain-text-ish files are cheaper and clearer inline than as documents.
-            if mime.startswith("text/") or mime in ("application/json", "application/xml"):
-                body = raw.decode("utf-8", "replace")[:100_000]
-                blocks.append({"type": "text",
-                               "text": f"--- contents of {att['name']} ---\n{body}"})
-                continue
-
-            notes.append(f"I can't read {att['name']} ({mime or 'unknown type'}) — "
-                         "send an image, PDF, or text file.")
+            block, note = block_for(raw, att.get("mime") or "", att["name"], att["kind"])
+            if block:
+                blocks.append(block)
+            if note:
+                notes.append(note)
         except MediaError as exc:
             notes.append(str(exc))
         except Exception:
             log.exception("attachment failed: %s", att.get("name"))
             notes.append(f"Something went wrong reading {att.get('name', 'that file')}.")
 
+    return blocks, notes
+
+
+def block_for(raw: bytes, mime: str, name: str,
+              kind: str = "document") -> tuple[dict[str, Any] | None, str | None]:
+    """bytes -> (content block, note). At most one of the two is set.
+
+    Split out of to_blocks so the same mime handling serves any source. to_blocks
+    is Telegram-shaped -- it starts from a file_id and downloads -- but a browser
+    upload already holds the bytes, and duplicating this ladder for it would have
+    guaranteed the two drift apart at the next format we support.
+    """
+    if kind == "voice":
+        return None, f'Voice note, transcribed: "{transcribe(raw, name)}"'
+
+    if kind == "photo" or mime in IMAGE_TYPES:
+        return {
+            "type": "image",
+            "source": {"type": "base64",
+                       "media_type": mime if mime in IMAGE_TYPES else DEFAULT_PHOTO_MIME,
+                       "data": base64.b64encode(raw).decode("ascii")},
+        }, None
+
+    if mime == "application/pdf":
+        return {
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf",
+                       "data": base64.b64encode(raw).decode("ascii")},
+        }, None
+
+    # Plain-text-ish files are cheaper and clearer inline than as documents.
+    if mime.startswith("text/") or mime in ("application/json", "application/xml"):
+        body = raw.decode("utf-8", "replace")[:100_000]
+        return {"type": "text", "text": f"--- contents of {name} ---\n{body}"}, None
+
+    return None, (f"I can't read {name} ({mime or 'unknown type'}) — "
+                  "send an image, PDF, or text file.")
+
+
+# Dashboard upload limits. Per-file size and file count are Trav's call.
+# TOTAL_UPLOAD_BYTES is not: Anthropic caps a request at ~32MB, so ten 25MB
+# files can never share one turn however generous the UI is. Failing here with a
+# sentence beats a 413 from the model API midway through the turn.
+MAX_UPLOAD_FILES = 10
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+TOTAL_UPLOAD_BYTES = 28 * 1024 * 1024
+
+
+def blocks_from_uploads(files: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Browser uploads -> (content blocks, notes).
+
+    Each file is {name, mime, data} with data base64-encoded. Keeps to_blocks'
+    promise that one bad attachment never sinks the rest of the turn.
+    """
+    blocks: list[dict[str, Any]] = []
+    notes: list[str] = []
+    running = 0
+
+    for f in files[:MAX_UPLOAD_FILES]:
+        name = str(f.get("name") or "attachment")
+        try:
+            raw = base64.b64decode(str(f.get("data") or ""), validate=True)
+        except Exception:
+            notes.append(f"{name} didn't arrive intact and was skipped.")
+            continue
+        if not raw:
+            notes.append(f"{name} was empty and was skipped.")
+            continue
+        if len(raw) > MAX_UPLOAD_BYTES:
+            notes.append(f"{name} is {len(raw) // (1024 * 1024)}MB, over the "
+                         f"{MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit — skipped.")
+            continue
+        if running + len(raw) > TOTAL_UPLOAD_BYTES:
+            notes.append(f"{name} and anything after it were dropped: one turn has to fit "
+                         f"under {TOTAL_UPLOAD_BYTES // (1024 * 1024)}MB. Send fewer at once.")
+            break
+        running += len(raw)
+        try:
+            block, note = block_for(raw, str(f.get("mime") or ""), name)
+        except Exception:
+            log.exception("upload failed: %s", name)
+            notes.append(f"Something went wrong reading {name}.")
+            continue
+        if block:
+            blocks.append(block)
+        if note:
+            notes.append(note)
+
+    if len(files) > MAX_UPLOAD_FILES:
+        notes.append(f"Only the first {MAX_UPLOAD_FILES} attachments were read "
+                     f"({len(files)} were sent).")
     return blocks, notes
