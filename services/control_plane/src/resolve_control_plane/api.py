@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import datetime as dt
 import os
 import time
 
@@ -19,6 +20,11 @@ from .assistant import (
 from .config import load_json, model_choice
 
 app = FastAPI(title="RESOLVE Control Plane", version=__version__)
+
+# Process start, for /v1/health -> build.uptime_seconds. A restart is the signal
+# that a deploy landed, so this doubles as "has my push gone out yet".
+_STARTED_AT_EPOCH = time.time()
+_STARTED_AT = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
 
 
 @app.on_event("startup")
@@ -273,7 +279,24 @@ async def health_post(body: dict) -> dict:
 
 @app.get("/v1/health", dependencies=[Depends(auth)])
 async def health_get() -> dict:
-    return {"latest": health.latest()}
+    return {"latest": health.latest(), "build": _build_info()}
+
+
+def _build_info() -> dict:
+    """Which commit is actually serving, and since when.
+
+    Added because "is my fix live yet?" was unanswerable from outside: a bug
+    report and a not-yet-deployed fix look identical, and twice in one day a
+    stale build was mistaken for a broken one. RENDER_GIT_COMMIT is injected by
+    Render on every deploy; the fallback is for local runs.
+    """
+    sha = os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT") or "unknown"
+    return {
+        "commit": sha[:7] if sha != "unknown" else sha,
+        "branch": os.getenv("RENDER_GIT_BRANCH") or "unknown",
+        "started_at": _STARTED_AT,
+        "uptime_seconds": int(time.time() - _STARTED_AT_EPOCH),
+    }
 
 
 @app.get("/v1/audit", dependencies=[Depends(auth)])
