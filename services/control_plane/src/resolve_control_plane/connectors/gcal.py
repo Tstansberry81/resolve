@@ -25,32 +25,77 @@ def _service():
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
+MAX_EVENTS = int(os.getenv("GCAL_MAX_EVENTS", "250"))
+
+
 def list_events(days: int = 7) -> list[dict]:
+    """Events in the next ``days``, paginated.
+
+    This used to ask for a single page of maxResults=25 and return whatever came
+    back. Because singleEvents=True expands every recurring event into one row
+    per occurrence, a few weekly classes burn 25 rows inside two days -- so the
+    horizon silently collapsed to a couple of days regardless of ``days``, and a
+    class further out simply did not exist as far as the model could tell. It had
+    no way to know it was looking at a truncated list, so it reasonably concluded
+    the events weren't there.
+
+    Rows also carry ``end`` and ``series_id`` now. Without an end time there was
+    no way to answer "when does that class finish", and with singleEvents=True
+    ``id`` is the OCCURRENCE -- deleting it removes one meeting and leaves the
+    series. ``series_id`` (recurringEventId) is what a "delete the class" has to
+    target.
+    """
     svc = _service()
     now = dt.datetime.now(dt.timezone.utc)
-    resp = (
-        svc.events()
-        .list(
-            calendarId=os.environ["GOOGLE_CALENDAR_ID"],
-            timeMin=now.isoformat(),
-            timeMax=(now + dt.timedelta(days=days)).isoformat(),
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=25,
+    horizon = now + dt.timedelta(days=days)
+    out: list[dict] = []
+    page_token: str | None = None
+    truncated = False
+
+    while True:
+        resp = (
+            svc.events()
+            .list(
+                calendarId=os.environ["GOOGLE_CALENDAR_ID"],
+                timeMin=now.isoformat(),
+                timeMax=horizon.isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=250,
+                pageToken=page_token,
+            )
+            .execute()
         )
-        .execute()
-    )
-    out = []
-    for ev in resp.get("items", []):
-        start = ev.get("start", {})
-        out.append(
-            {
-                "id": ev.get("id"),
-                "title": ev.get("summary", "(untitled)"),
-                "start": start.get("dateTime") or start.get("date"),
-                "location": ev.get("location"),
-            }
-        )
+        for ev in resp.get("items", []):
+            if len(out) >= MAX_EVENTS:
+                truncated = True
+                break
+            start, end = ev.get("start", {}), ev.get("end", {})
+            out.append(
+                {
+                    "id": ev.get("id"),
+                    "title": ev.get("summary", "(untitled)"),
+                    "start": start.get("dateTime") or start.get("date"),
+                    "end": end.get("dateTime") or end.get("date"),
+                    "location": ev.get("location"),
+                    # Present only on occurrences of a recurring series. Delete
+                    # THIS to remove the whole class; delete `id` for one meeting.
+                    "series_id": ev.get("recurringEventId"),
+                }
+            )
+        page_token = resp.get("nextPageToken")
+        if truncated or not page_token:
+            break
+
+    if truncated:
+        # In-band, because a silently short list is what caused the original
+        # confusion -- the model has to be able to see its own horizon.
+        out.append({
+            "id": None,
+            "title": (f"[TRUNCATED — first {MAX_EVENTS} events only; the {days}-day "
+                      "window holds more. Ask again with a shorter `days`.]"),
+            "start": None, "end": None, "location": None, "series_id": None,
+        })
     return out
 
 

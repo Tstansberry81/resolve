@@ -77,10 +77,19 @@ TOOL_POLICY = {
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "get_calendar",
-        "description": "List upcoming Google Calendar events. Call this before answering any question about the user's schedule.",
+        "description": (
+            "List upcoming Google Calendar events. Call this before answering any "
+            "question about the user's schedule. Each row has start, end, id and "
+            "series_id. Recurring events are expanded to ONE ROW PER OCCURRENCE, so a "
+            "weekly class appears many times — `id` is that single meeting and "
+            "`series_id` is the whole series. Ask for the `days` you actually need: a "
+            "class starting three weeks out needs days>=21 or it simply won't be in "
+            "the results. If the last row is titled [TRUNCATED], the window held more "
+            "than came back and anything later is missing — narrow `days` and re-ask."
+        ),
         "input_schema": {
             "type": "object",
-            "properties": {"days": {"type": "integer", "description": "How many days ahead (default 7)"}},
+            "properties": {"days": {"type": "integer", "description": "How many days ahead (default 7, max 60)"}},
             "additionalProperties": False,
         },
     },
@@ -340,10 +349,23 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "delete_calendar_event",
-        "description": "Delete a Google Calendar event by id. Get the id from get_calendar first. Always requires the user's approval banner.",
+        "description": (
+            "Delete a Google Calendar event by id. Get the id from get_calendar first. "
+            "Always requires the user's approval banner. CHOOSE THE ID DELIBERATELY: "
+            "pass a row's `id` to cancel ONE meeting, or its `series_id` to remove the "
+            "entire recurring series. Deleting occurrence ids one at a time to clear a "
+            "class is wrong — it's a call per meeting, and they all return the moment "
+            "the series is touched."
+        ),
         "input_schema": {
             "type": "object",
-            "properties": {"event_id": {"type": "string"}, "title": {"type": "string", "description": "Event title, for the approval preview"}},
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "A row's `id` for one meeting, or its `series_id` for the whole series.",
+                },
+                "title": {"type": "string", "description": "Event title, for the approval preview"},
+            },
             "required": ["event_id"],
             "additionalProperties": False,
         },
