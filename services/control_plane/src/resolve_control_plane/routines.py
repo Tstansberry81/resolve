@@ -1,8 +1,15 @@
 """Proactive routines — RESOLVE acts without being asked.
 
-The scheduler ticks once a minute; inside the 7:00-7:10am ET window it runs
-the morning brief once per day through the normal Sonnet loop, so the brief
-streams into the dashboard and lands in the vault like any other goal.
+The scheduler ticks once a minute and runs each routine once per ET day through
+the normal assistant loop, so a brief streams into the dashboard and lands in the
+vault like any other goal.
+
+Each routine has a scheduled time and a grace period rather than a fixed ten
+minute window. The window version required the process to be alive for those ten
+minutes; on Render it often isn't, because the service spins down when idle, and
+a missed window meant the day was skipped with no error and no retry. Six days of
+briefs went missing that way in August. Grace is per routine: a backfill is fine
+hours late, a "when should you leave for the airport" is not.
 """
 
 from __future__ import annotations
@@ -11,7 +18,7 @@ import asyncio
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import anyio
@@ -258,16 +265,92 @@ async def _reindex_vault() -> None:
         log.exception("vault reindex failed")
 
 
+# event type -> (global holding the last-run date, hour, minute, grace hours)
+#
+# Grace exists because "catch up" isn't always right. A daily ingest is a
+# backfill of yesterday, so running it at 4pm is fine. A travel watch telling you
+# when to leave is worthless once the flight has gone. A brief at lunchtime is
+# still a brief; at 11pm it's noise.
+_ROUTINES: dict[str, tuple[str, int, int, float]] = {
+    "routine.daily_ingest":  ("_last_ingest_date",     0,  0, 23.0),
+    "routine.travel_watch":  ("_last_travel_date",     6,  0,  4.0),
+    "routine.morning_brief": ("_last_brief_date",      7,  0,  5.0),
+    "routine.mail_scan":     ("_last_mailscan_date",   7, 30,  8.0),
+    "routine.weekly_review": ("_last_review_date",    18,  0,  6.0),
+    "routine.budget_check":  ("_last_budget_date",    20, 30,  3.0),
+}
+
+
+def _seed_last_runs() -> None:
+    """Rebuild today's last-run dates from persisted events.
+
+    The _last_*_date guards are module globals, so a restart forgets what already
+    ran. That was harmless while each routine only fired inside a ten-minute
+    window -- it just missed the day. Now that a late boot catches up, an
+    unseeded guard would re-run this morning's brief on every Render restart.
+    bus.emit already persists to agent_events, so the events ARE the record;
+    read them back rather than inventing a second piece of state to keep in sync.
+    """
+    today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    try:
+        rows = store.select("agent_events", {
+            "type": f"in.({','.join(_ROUTINES)})",
+            "order": "created_at.desc",
+            "limit": "60",
+        })
+    except Exception:
+        log.warning("could not seed routine state; today's routines may re-run",
+                    exc_info=True)
+        return
+    seeded = []
+    for row in rows:
+        entry = _ROUTINES.get(str(row.get("type")))
+        if not entry:
+            continue
+        try:
+            # created_at is UTC; compare in ET so "today" means Trav's today.
+            when = (datetime.fromisoformat(str(row.get("created_at") or "").replace("Z", "+00:00"))
+                    .astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d"))
+        except ValueError:
+            continue
+        if when == today and globals().get(entry[0]) != today:
+            globals()[entry[0]] = today
+            seeded.append(entry[0])
+    if seeded:
+        log.info("routine state seeded from events: %s", ", ".join(seeded))
+
+
+def _due(now: datetime, event_type: str) -> bool:
+    """Is this routine owed a run right now?
+
+    Was `hour == N and minute < 10`: a ten-minute window once a day, so if the
+    process wasn't alive for those ten minutes the day was skipped in silence. On
+    Render that's routine -- the service spins down when idle, so a quiet night
+    means no process at 7am and no brief, with no error and no retry. Six
+    consecutive days went missing that way in August.
+    """
+    name, hour, minute, grace = _ROUTINES[event_type]
+    if globals().get(name) == now.strftime("%Y-%m-%d"):
+        return False  # already ran today
+    scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return scheduled <= now < scheduled + timedelta(hours=grace)
+
+
 async def scheduler_loop() -> None:
     log.info("routine scheduler started")
+    # Recover what already ran today before the first tick, so catching up
+    # doesn't mean repeating.
+    await asyncio.to_thread(_seed_last_runs)
     while True:
         try:
             now = datetime.now(ZoneInfo("America/New_York"))
             today = now.strftime("%Y-%m-%d")
             # midnight: ingest the prior day's activity into the vault (once/day)
             global _last_ingest_date
-            if now.hour == 0 and now.minute < 10 and _last_ingest_date != today:
+            if _due(now, "routine.daily_ingest"):
                 _last_ingest_date = today
+                await bus.emit("core", "routine.daily_ingest",
+                               "Daily vault ingest started", level="info")
                 from . import ingest
                 await ingest.run_daily_ingest()
                 # Re-embed the vault right after the ingest writes the day's notes,
@@ -275,25 +358,22 @@ async def scheduler_loop() -> None:
                 # skipped by hash, so a quiet day costs no embedding calls at all.
                 await _reindex_vault()
             # 6:00 on travel days: flight status + when to leave
-            if (now.hour == 6 and now.minute < 10
-                    and _last_travel_date != today):
+            if _due(now, "routine.travel_watch"):
                 await run_travel_watch()
-            if (now.hour == 7 and now.minute < 10
-                    and _last_brief_date != today):
+            if _due(now, "routine.morning_brief"):
                 await run_morning_brief()
             # 7:30: inbox→calendar sweep (after the brief; runs are serialized)
-            if (now.hour == 7 and 30 <= now.minute < 40
-                    and _last_mailscan_date != today):
+            if _due(now, "routine.mail_scan"):
                 await run_mail_scan()
             # 18:00 Sunday: weekly review
-            if (now.weekday() == 6 and now.hour == 18 and now.minute < 10
-                    and _last_review_date != today):
+            if now.weekday() == 6 and _due(now, "routine.weekly_review"):
                 await run_weekly_review()
             # 20:30: spending guardrail check (quiet unless a threshold is crossed)
             global _last_budget_date
-            if (now.hour == 20 and 30 <= now.minute < 40
-                    and _last_budget_date != today):
+            if _due(now, "routine.budget_check"):
                 _last_budget_date = today
+                await bus.emit("core", "routine.budget_check",
+                               "Spending guardrail checked", level="info")
                 await check_budget()
         except Exception:
             log.exception("routine tick failed")
