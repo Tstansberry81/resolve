@@ -18,21 +18,44 @@ interface Bubble {
   id: number;
   who: "you" | "sonnet";
   text: string;
+  ts: number;
 }
+
+// Reckoned in ET, not the browser's zone: "today" has to mean Trav's today, and
+// going through Intl keeps DST right without any date arithmetic.
+const ET_DAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const ET_TIME = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+const etDay = (ms: number) => ET_DAY.format(new Date(ms));
 
 function toBubbles(events: AgentEvent[]): Bubble[] {
   const out: Bubble[] = [];
+  // The log is per-day: at midnight ET it empties and starts fresh instead of
+  // trailing yesterday into this morning. Derived from each event's timestamp
+  // rather than wiped by a timer, so a tab left open overnight is still correct
+  // — the 30s snapshot poll re-renders and the day simply rolls over.
+  const today = etDay(Date.now());
   // events arrive newest-first; walk oldest-first
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
+    if (etDay(e.ts) !== today) continue;
     if (e.type === "goal.accepted") {
       // prefer the full command in detail; fall back to the (truncated) summary
       const full = (e.detail && e.detail.trim()) || e.summary.replace(/^Goal accepted: /, "");
-      out.push({ id: e.id, who: "you", text: full });
+      out.push({ id: e.id, who: "you", text: full, ts: e.ts });
     } else if (e.type === "goal.queued") {
-      out.push({ id: e.id, who: "sonnet", text: e.summary });
+      out.push({ id: e.id, who: "sonnet", text: e.summary, ts: e.ts });
     } else if (e.type === "assistant.reply") {
-      out.push({ id: e.id, who: "sonnet", text: e.detail ?? e.summary });
+      out.push({ id: e.id, who: "sonnet", text: e.detail ?? e.summary, ts: e.ts });
     }
   }
   return out.slice(-12);
@@ -59,6 +82,9 @@ export function ChatStrip() {
           <div className={b.who === "you" ? styles.bubbleYou : styles.bubbleSonnet}>
             {b.who === "sonnet" && <span className={styles.tag}>RESOLVE</span>}
             {renderRich(b.text)}
+            <time className={styles.stamp} dateTime={new Date(b.ts).toISOString()}>
+              {ET_TIME.format(new Date(b.ts))}
+            </time>
           </div>
         </div>
       ))}

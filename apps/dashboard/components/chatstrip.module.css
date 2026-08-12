@@ -82,3 +82,15 @@
   color: var(--text-3, var(--text-2));
   margin-bottom: 3px;
 }
+
+/* Timestamp on every bubble. Block-level and right-aligned so it sits under the
+   text rather than reflowing it, and dimmed — it's reference, not content. */
+.stamp {
+  display: block;
+  margin-top: 4px;
+  text-align: right;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  opacity: 0.45;
+  font-variant-numeric: tabular-nums;
+}
