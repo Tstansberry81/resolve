@@ -1716,3 +1716,32 @@ a.artifact-link:hover {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Window dragging (Electron desktop app) ──────────────────────────────────
+   main.js sets titleBarStyle: "hiddenInset", which removes the OS title bar —
+   and with it the only thing macOS gives you to grab. A window with no title bar
+   can only be moved by a region the page itself declares, and nothing here did,
+   so the app couldn't be moved at all.
+
+   The header is the handle. app-region is inherited by descendants in Electron,
+   so every interactive child has to opt back out explicitly or it stops taking
+   clicks — a draggable button is a dead button. .vitals-pop is the dropdown
+   panel, which renders inside the header and would otherwise drag the whole
+   window when you tried to read it.
+
+   Inert in a normal browser tab: unknown properties are simply ignored, so the
+   hosted dashboard is unaffected. */
+.v2-header {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.v2-header button,
+.v2-header a,
+.v2-header input,
+.v2-header select,
+.v2-header [role="button"],
+.v2-header .vitals-pop {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
