@@ -35,7 +35,11 @@ log = logging.getLogger("resolve.assistant")
 # and max_tokens caps thinking + reply TOGETHER — so a tight max_tokens now
 # truncates mid-answer. Every max_tokens in this repo was re-checked for that.
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-opus-5")
-MAX_TURNS = 8
+# Raised from 8 and made tunable. Bulk work -- "add these 28 lectures to Notion"
+# -- spends several turns on discovery (search/schema/query) before it creates
+# anything, and 8 left room for about ten writes. The loop then ran out and
+# reported whatever it had last said, which was "Done."
+MAX_TURNS = int(os.getenv("ASSISTANT_MAX_TURNS", "16"))
 
 # Effort was never sent, so every turn ran at Opus 5's `high` default. This is the
 # assistant's cost lever: it can't drop to Haiku (it carries the whole
@@ -1114,6 +1118,22 @@ async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = N
                          "content": f"Error: {exc}", "is_error": True}
                     )
             messages.append({"role": "user", "content": results})
+        else:
+            # for/else: reached only when the loop is EXHAUSTED rather than broken
+            # out of -- i.e. the turn budget ran out with work still in flight.
+            # `final_text` is then just whatever the model happened to say on its
+            # last turn, mid-task, and reporting that as the answer is how "Done."
+            # came back after ten of twenty-eight Notion pages and zero of the
+            # calendar events. A truncated run must never read as a finished one.
+            log.warning("assistant hit MAX_TURNS=%s with work still in flight", MAX_TURNS)
+            await bus.emit("assistant", "assistant.truncated",
+                           f"Stopped at the {MAX_TURNS}-turn limit with work unfinished",
+                           level="warn", goal_id=goal_id)
+            final_text = ((final_text.rstrip() + "\n\n") if final_text.strip() else "") + (
+                f"\u26a0\ufe0f I hit my {MAX_TURNS}-turn limit before finishing, so this is "
+                "PARTIAL — some of what you asked for did not happen. Check what landed, "
+                "then send the rest in smaller batches (one course, or one system, at a time)."
+            )
 
         # A handoff reply ("Queued — the planner will…") is the assistant finishing,
         # NOT the work finishing. Marking the goal completed here made a plan that
