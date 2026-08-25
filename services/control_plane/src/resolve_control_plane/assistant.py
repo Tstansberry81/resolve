@@ -186,6 +186,27 @@ def _arg_list(args: dict[str, Any], key: str) -> list:
     return [raw]
 
 
+# Tool results are capped before they go back to the model. The cap used to cut
+# the JSON mid-row and say nothing, so a Notion query that returned 28 lectures
+# arrived as 9 and read as the whole set -- the same silent-truncation failure as
+# the 25-row calendar horizon and the "Done." that meant "out of turns". Cutting
+# is fine; cutting quietly is not. The marker tells the model it is holding a
+# fragment and what to do about it, which is what makes a re-query possible.
+TOOL_RESULT_CHARS = int(os.getenv("ASSISTANT_TOOL_RESULT_CHARS", "4000"))
+
+
+def _tool_result_text(result: Any) -> str:
+    text = json.dumps(result, default=str)
+    if len(text) <= TOOL_RESULT_CHARS:
+        return text
+    return text[:TOOL_RESULT_CHARS] + (
+        f"\n\n[TRUNCATED: this result was {len(text)} characters and was cut to "
+        f"{TOOL_RESULT_CHARS}. You are holding a PARTIAL result, and the JSON above "
+        "ends mid-record. Do NOT report it as complete or count from it. Call again "
+        "with a narrower filter, a smaller limit, or a shorter date range.]"
+    )
+
+
 def _connector_call(name: str, args: dict[str, Any],
                     goal_id: str | None = None) -> Any:
     if name == "get_calendar":
@@ -1111,7 +1132,7 @@ async def _loop(goal_id: str, text: str, blocks: list[dict[str, Any]] | None = N
                     )
                     results.append(
                         {"type": "tool_result", "tool_use_id": tu.id,
-                         "content": json.dumps(result, default=str)[:4000]}
+                         "content": _tool_result_text(result)}
                     )
                 except Exception as exc:
                     await bus.emit(

@@ -509,6 +509,11 @@ def school_day(day: str | None = None, horizon_days: int = 7) -> dict:
     "errors" and the rest still comes back. A brief that silently drops the
     exam list is worse than one that says it couldn't read it.
     """
+    def keep(d: dict) -> dict:
+        # Empty properties are the majority of a fresh row and every one of them
+        # spends characters against the model's tool-result cap. Drop them.
+        return {k: v for k, v in d.items() if v not in (None, "", [], False)}
+
     day = day or datetime.now(ZoneInfo("America/New_York")).date().isoformat()
     horizon_days = max(1, min(int(horizon_days), 60))
     out: dict[str, Any] = {"day": day, "lectures": [], "assignments_due": [],
@@ -520,11 +525,11 @@ def school_day(day: str | None = None, horizon_days: int = 7) -> dict:
             filter={"property": "Date", "date": {"equals": day}},
             limit=25,
         ):
-            out["lectures"].append({
+            out["lectures"].append(keep({
                 "course": r.get("Course"), "lecture": r.get("Lecture") or r.get("title"),
                 "topic": r.get("Topic"), "readings": r.get("Readings"),
                 "unit": r.get("Unit"), "notes": r.get("Notes"), "url": r.get("url"),
-            })
+            }))
     except Exception as e:  # noqa: BLE001 - reported, not raised
         out["errors"].append(f"Lectures: {e}")
 
@@ -539,9 +544,9 @@ def school_day(day: str | None = None, horizon_days: int = 7) -> dict:
             limit=50,
         )
         out["assignments_due"] = [
-            {"assignment": r.get("Assignment") or r.get("title"), "class": r.get("Class"),
-             "type": r.get("Type"), "due": r.get("Due Date"), "status": r.get("Status"),
-             "priority": r.get("Priority"), "url": r.get("url")}
+            keep({"assignment": r.get("Assignment") or r.get("title"), "class": r.get("Class"),
+                  "type": r.get("Type"), "due": r.get("Due Date"), "status": r.get("Status"),
+                  "priority": r.get("Priority")})
             for r in rows
             if str(r.get("Status") or "").strip().lower() not in _DONE_STATUS
         ]
@@ -559,9 +564,9 @@ def school_day(day: str | None = None, horizon_days: int = 7) -> dict:
             limit=25,
         )
         out["exams_upcoming"] = [
-            {"event": r.get("Event") or r.get("title"), "date": r.get("Date"),
-             "type": r.get("Type"), "status": r.get("Status"), "notes": r.get("Notes"),
-             "on_gcal": r.get("GCal Synced"), "url": r.get("url")}
+            keep({"event": r.get("Event") or r.get("title"), "date": r.get("Date"),
+                  "type": r.get("Type"), "status": r.get("Status"), "notes": r.get("Notes"),
+                  "on_gcal": r.get("GCal Synced")})
             for r in rows
             if str(r.get("Status") or "").strip().lower() not in _DONE_STATUS
         ]
