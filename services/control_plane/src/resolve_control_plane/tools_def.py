@@ -10,6 +10,7 @@ TOOL_POLICY = {
     "get_calendar": ("calendar.read", "calendar"),
     "create_calendar_event": ("calendar.create", "calendar"),
     "get_tasks": ("notion.tasks.read", "notion"),
+    "get_school_day": ("notion.read", "notion"),
     "create_task": ("notion.page.create", "notion"),
     "get_unread_email": ("email.read", "gmail"),
     "get_inbox_recent": ("email.read", "gmail"),
@@ -159,6 +160,18 @@ TOOLS: list[dict[str, Any]] = [
         "name": "get_tasks",
         "description": "List open tasks from the user's Notion Tasks database.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "get_school_day",
+        "description": "One call for a school day: the lectures scheduled on that date (course, topic, readings, unit), assignments due inside the horizon, and upcoming exams — read straight from the Notion Lectures, Assignments, and Exams & Deadlines databases. Use this for 'what do I have today', class prep, and the morning brief instead of notion_search + notion_schema + notion_query; get_tasks only sees the Tasks inbox and knows nothing about coursework. Anything it could not read comes back in an errors list - say so rather than reporting an empty day.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "day": {"type": "string", "description": "YYYY-MM-DD. Defaults to today in America/New_York."},
+                "horizon_days": {"type": "integer", "description": "How far ahead to look for assignments (default 7). Exams use double this."},
+            },
+            "additionalProperties": False,
+        },
     },
     {
         "name": "create_task",

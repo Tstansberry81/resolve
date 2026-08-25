@@ -13,7 +13,9 @@ list means pages need sharing in Notion — see docs/NOTION_ACCESS.md.
 from __future__ import annotations
 
 import os
+from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -446,3 +448,124 @@ def create_task(
     page = _req("POST", "/pages",
                 json={"parent": {"database_id": NOTION_TASKS_DB}, "properties": props})
     return {"id": page["id"], "url": page.get("url"), "title": title}
+
+
+# --- school (the semester databases) -----------------------------------------
+#
+# Trav's Notion grew a whole school section in August 2026: Lectures, Assignments,
+# and Exams & Deadlines alongside the original Tasks inbox. The morning brief only
+# ever read Tasks, so on the first day of the semester it opened with "zero open
+# tasks in Notion" while the Lectures database held that day's topic and readings.
+#
+# school_day() is one deterministic call instead of six model-driven ones. The
+# brief runs on a turn budget, and search -> schema -> filter x3 spent it before
+# any prose got written. Same reason get_tasks exists rather than making the model
+# rediscover the Tasks database every morning.
+
+_SCHOOL_DBS: dict[str, tuple[str, str]] = {
+    # key: (Notion title, known id)
+    "lectures": ("Lectures", "3c56c560-994d-816d-be72-c7ddf2bb5f76"),
+    "assignments": ("Assignments", "52d385d1-7894-4f2f-9bc4-2d9cf6d2bd29"),
+    "exams": ("Exams & Deadlines", "a7b85bcf-bd26-473b-8a40-860dc4409738"),
+}
+
+# A database that got recreated keeps its title but not its id, and a stale id
+# fails as an empty day rather than an error. Resolve by id, fall back to title.
+_db_ids: dict[str, str] = {}
+
+# Status values that mean "no longer owed". Matched case-insensitively against
+# whatever the select happens to be called, so renaming an option doesn't
+# resurrect finished work in the brief.
+_DONE_STATUS = {"done", "complete", "completed", "submitted", "turned in", "graded",
+                "cancelled", "canceled", "skipped"}
+
+
+def _school_db(key: str) -> str:
+    if key in _db_ids:
+        return _db_ids[key]
+    title, known = _SCHOOL_DBS[key]
+    db_id = os.getenv(f"NOTION_{key.upper()}_DB") or known
+    try:
+        _req("GET", f"/databases/{db_id}")
+    except RuntimeError:
+        hit = next((d for d in search(title, kind="database", limit=10)
+                    if d["title"].strip().lower() == title.lower()), None)
+        if not hit:
+            raise
+        db_id = hit["id"]
+    _db_ids[key] = db_id
+    return db_id
+
+
+def _shift(day: str, days: int) -> str:
+    return (date.fromisoformat(day) + timedelta(days=days)).isoformat()
+
+
+def school_day(day: str | None = None, horizon_days: int = 7) -> dict:
+    """Today's classes and what's bearing down: lectures on `day`, assignments
+    due within `horizon_days`, exams within twice that.
+
+    Every section is independent — an unreachable database reports itself in
+    "errors" and the rest still comes back. A brief that silently drops the
+    exam list is worse than one that says it couldn't read it.
+    """
+    day = day or datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    horizon_days = max(1, min(int(horizon_days), 60))
+    out: dict[str, Any] = {"day": day, "lectures": [], "assignments_due": [],
+                           "exams_upcoming": [], "errors": []}
+
+    try:
+        for r in query_database(
+            _school_db("lectures"),
+            filter={"property": "Date", "date": {"equals": day}},
+            limit=25,
+        ):
+            out["lectures"].append({
+                "course": r.get("Course"), "lecture": r.get("Lecture") or r.get("title"),
+                "topic": r.get("Topic"), "readings": r.get("Readings"),
+                "unit": r.get("Unit"), "notes": r.get("Notes"), "url": r.get("url"),
+            })
+    except Exception as e:  # noqa: BLE001 - reported, not raised
+        out["errors"].append(f"Lectures: {e}")
+
+    try:
+        rows = query_database(
+            _school_db("assignments"),
+            filter={"and": [
+                {"property": "Due Date", "date": {"on_or_after": day}},
+                {"property": "Due Date", "date": {"on_or_before": _shift(day, horizon_days)}},
+            ]},
+            sorts=[{"property": "Due Date", "direction": "ascending"}],
+            limit=50,
+        )
+        out["assignments_due"] = [
+            {"assignment": r.get("Assignment") or r.get("title"), "class": r.get("Class"),
+             "type": r.get("Type"), "due": r.get("Due Date"), "status": r.get("Status"),
+             "priority": r.get("Priority"), "url": r.get("url")}
+            for r in rows
+            if str(r.get("Status") or "").strip().lower() not in _DONE_STATUS
+        ]
+    except Exception as e:  # noqa: BLE001
+        out["errors"].append(f"Assignments: {e}")
+
+    try:
+        rows = query_database(
+            _school_db("exams"),
+            filter={"and": [
+                {"property": "Date", "date": {"on_or_after": day}},
+                {"property": "Date", "date": {"on_or_before": _shift(day, horizon_days * 2)}},
+            ]},
+            sorts=[{"property": "Date", "direction": "ascending"}],
+            limit=25,
+        )
+        out["exams_upcoming"] = [
+            {"event": r.get("Event") or r.get("title"), "date": r.get("Date"),
+             "type": r.get("Type"), "status": r.get("Status"), "notes": r.get("Notes"),
+             "on_gcal": r.get("GCal Synced"), "url": r.get("url")}
+            for r in rows
+            if str(r.get("Status") or "").strip().lower() not in _DONE_STATUS
+        ]
+    except Exception as e:  # noqa: BLE001
+        out["errors"].append(f"Exams & Deadlines: {e}")
+
+    return out

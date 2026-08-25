@@ -32,10 +32,17 @@ _last_ingest_date: str | None = None
 _last_mailscan_date: str | None = None
 
 BRIEF_PROMPT = (
-    "Morning brief: check my calendar for the next 2 days, my open Notion tasks,"
-    " and my unread email (skip any connector that errors instead of stopping)."
-    " Write a short, warm morning brief with the highlights and anything urgent,"
-    " then vault_log it titled 'Morning brief' with today's date."
+    "Morning brief: check my calendar for the next 2 days, call get_school_day for"
+    " today's classes and coursework, check my open Notion tasks, and check my unread"
+    " email (skip any connector that errors instead of stopping)."
+    " Write a short, warm morning brief with the highlights and anything urgent."
+    " If get_school_day returns lectures, lead with a CLASSES TODAY section: each class"
+    " with its time from the calendar and its topic and readings from the lecture row,"
+    " so I know what each one is about before I walk in. Flag anything due in the next"
+    " few days and any exam inside two weeks. If it comes back empty with no errors,"
+    " say the day is clear rather than inventing a schedule; if it reports errors, name"
+    " what could not be read instead of calling the day empty."
+    " Then vault_log it titled 'Morning brief' with today's date."
 )
 
 MAILSCAN_PROMPT = (

@@ -199,6 +199,11 @@ def _connector_call(name: str, args: dict[str, Any],
         )
     if name == "get_tasks":
         return notion_api.list_open_tasks()
+    if name == "get_school_day":
+        return notion_api.school_day(
+            day=(str(args.get("day")).strip() or None) if args.get("day") else None,
+            horizon_days=_arg_int(args, "horizon_days", 7, 1, 60),
+        )
     if name == "create_task":
         return notion_api.create_task(
             args["title"],

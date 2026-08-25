@@ -153,6 +153,14 @@ def _sandbox(monkeypatch):
             "recurring": bool(rec), "excluded": len(exc or [])})
     monkeypatch.setattr(gcal, "delete_event", lambda eid: {"deleted": True, "id": eid})
     monkeypatch.setattr(notion_api, "list_open_tasks", lambda: fx.notion_tasks())
+    monkeypatch.setattr(notion_api, "school_day", lambda day=None, horizon_days=7: {
+        "day": day or "2026-08-25", "errors": [],
+        "lectures": [{"course": "PHIL 1730", "lecture": "Why Moral Philosophy?",
+                      "topic": "Intro", "readings": "Plato, Apology", "unit": "Unit 1"}],
+        "assignments_due": [{"assignment": "Reading response 1", "due": "2026-08-27",
+                             "status": "Not Started", "type": "Reading"}],
+        "exams_upcoming": [],
+    })
     monkeypatch.setattr(notion_api, "create_task",
                         lambda title, **kw: {"id": "p9", "url": "https://notion/p9"})
     monkeypatch.setattr(notion_api, "archive_page", lambda pid: {"archived": True})
@@ -224,6 +232,10 @@ CASES: list[tuple[str, str, dict]] = [
     ("get_tasks", "list open", {}),
     ("get_tasks", "repeat call", {}),
     ("get_tasks", "ignores stray args", {}),
+    ("get_school_day", "defaults to today", {}),
+    ("get_school_day", "explicit day", {"day": "2026-08-25"}),
+    ("get_school_day", "wider horizon", {"day": "2026-08-25", "horizon_days": 14}),
+    ("get_school_day", "horizon clamped", {"horizon_days": 999}),
     ("create_task", "minimal", {"title": "Finish problem set"}),
     ("create_task", "full", {"title": "Essay draft", "due_date": "2026-07-30",
                              "priority": "High", "notes": "1500 words"}),
